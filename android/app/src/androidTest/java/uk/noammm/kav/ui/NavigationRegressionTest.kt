@@ -14,12 +14,8 @@ class NavigationRegressionTest {
         val leg = Moovit.Leg(Moovit.LegKind.RIDE, fromStop = 1, toStop = 2,
             stops = listOf(1, 2), shape = listOf(32.10001 to 34.90001, 32.11001 to 34.91001))
         val stops = points.mapIndexed { i, p -> i + 1 to Moovit.StopInfo(i + 1, "Stop", "", p.first, p.second) }.toMap()
-        // One circle per stop and no others: the shape's own ends stand in for a stop
-        // whose coordinates have not arrived, they are not a second pair on top of them.
         val drawn = rideStopPoints(listOf(leg), stops).map { it.second }
         assertEquals(2, drawn.size)
-        // The circles sit on the drawn line now rather than at the kerb beside it, so
-        // they are near their stops rather than exactly on them.
         points.zip(drawn).forEach { (stop, at) ->
             val off = metres(stop.first, stop.second, at.first, at.second)
             assertTrue("a stop circle landed $off m from its stop", off < 3.0)

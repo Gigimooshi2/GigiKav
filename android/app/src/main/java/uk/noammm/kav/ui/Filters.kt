@@ -22,21 +22,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uk.noammm.kav.data.Moovit
 
-/**
- * What a plan may contain. The transit modes go to the server as MVRouteTypes, so a
- * mode switched off is planned around rather than hidden; the taxi is a server flag
- * too. Bike, walking-only and share taxis are sorted out on the phone once the plan
- * is back, because the request has no word for them.
- */
 enum class ResultFilter {
-    BUS, TRAIN, LIGHT_RAIL, SHARE_TAXI, TAXI, BIKE, WALK;
+    BUS, TRAIN, LIGHT_RAIL, CARMELIT, RAKAVLIT, SHARE_TAXI, TAXI, BIKE, WALK;
 
-    /** Recomputed on every access so a language change is picked up immediately. */
     val label: String
         get() = when (this) {
             BUS -> T("Bus", "אוטובוס")
             TRAIN -> T("Train", "רכבת")
             LIGHT_RAIL -> T("Light rail", "רכבת קלה")
+            CARMELIT -> T("Carmelit", "כרמלית")
+            RAKAVLIT -> T("Rakavlit", "רכבלית")
             SHARE_TAXI -> T("Share taxi", "מונית שירות")
             TAXI -> T("Taxi", "מונית")
             BIKE -> T("Bike", "אופניים")
@@ -47,7 +42,9 @@ enum class ResultFilter {
         get() = when (this) {
             BUS -> T("Every bus operator", "כל מפעילי האוטובוסים")
             TRAIN -> T("Israel Railways", "רכבת ישראל")
-            LIGHT_RAIL -> T("Trams, the Carmelit and the cable cars", "רכבות קלות, הכרמלית והרכבלים")
+            LIGHT_RAIL -> T("The Jerusalem and Tel Aviv light rail", "הרכבת הקלה בירושלים ובתל אביב")
+            CARMELIT -> T("Haifa's underground funicular", "הרכבת התחתית של חיפה")
+            RAKAVLIT -> T("Cable Express, the Haifa cable car", "כבל אקספרס, הרכבלית של חיפה")
             SHARE_TAXI -> T("Monit sherut lines", "קווי מוניות שירות")
             TAXI -> T("Gett rides, on their own or before a train", "נסיעות Gett, בפני עצמן או לפני רכבת")
             BIKE -> T("Cycling routes", "מסלולי אופניים")
@@ -55,21 +52,17 @@ enum class ResultFilter {
         }
 }
 
-/** MVRouteType values for the request: every mode, minus the ones switched off. */
 fun routeTypesFor(on: Set<ResultFilter>): List<Int> {
     val all = listOf(0, 1, 2, 3, 4, 5, 6, 7)
     val off = HashSet<Int>()
     if (ResultFilter.BUS !in on) off.add(3)
     if (ResultFilter.TRAIN !in on) off.add(2)
-    if (ResultFilter.LIGHT_RAIL !in on) off.addAll(listOf(0, 1, 5, 6, 7))
+    if (ResultFilter.LIGHT_RAIL !in on) off.addAll(listOf(0, 1))
+    if (ResultFilter.CARMELIT !in on) off.add(7)
+    if (ResultFilter.RAKAVLIT !in on) off.addAll(listOf(5, 6))
     return all.filterNot { it in off }
 }
 
-/**
- * The plan's own results, minus what the rider does not want to see. A ride whose
- * line is not resolved yet is kept: its mode is unknown, and dropping it on a guess
- * would make cards vanish and come back as names arrive.
- */
 fun filterResults(list: List<Moovit.Itinerary>, on: Set<ResultFilter>, r: Moovit.Resolved): List<Moovit.Itinerary> {
     if (on.size == ResultFilter.entries.size) return list
     return list.filter { it ->
@@ -86,50 +79,63 @@ fun filterResults(list: List<Moovit.Itinerary>, on: Set<ResultFilter>, r: Moovit
                 Mode.BUS -> ResultFilter.BUS in on
                 Mode.TRAIN -> ResultFilter.TRAIN in on
                 Mode.TAXI -> ResultFilter.SHARE_TAXI in on
-                Mode.TRAM, Mode.SUBWAY, Mode.CABLE, Mode.GONDOLA, Mode.FUNICULAR -> ResultFilter.LIGHT_RAIL in on
+                Mode.TRAM, Mode.SUBWAY -> ResultFilter.LIGHT_RAIL in on
+                Mode.FUNICULAR -> ResultFilter.CARMELIT in on
+                Mode.CABLE, Mode.GONDOLA -> ResultFilter.RAKAVLIT in on
                 else -> true
             }
         }
     }
 }
 
-/** One row per filter, each with a switch. The same rows serve Settings and first launch. */
+@Composable
+fun SwitchRow(
+    label: String,
+    desc: String,
+    on: Boolean,
+    onToggle: (Boolean) -> Unit,
+    leading: @Composable () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.plate)
+            .border(1.dp, if (on) K.borderStrong else K.border, RoundedCornerShape(14.dp))
+            .semantics { contentDescription = label; toggleableState = if (on) ToggleableState.On else ToggleableState.Off }
+            .clickable(role = Role.Switch) { onToggle(!on) }
+            .padding(horizontal = K.gap3, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(K.gap3),
+    ) {
+        Box(Modifier.width(22.dp), contentAlignment = Alignment.Center) { leading() }
+        Column(Modifier.weight(1f)) {
+            Text(label, fontSize = 14.sp, color = if (on) K.text else K.muted)
+            Text(desc, fontSize = 11.sp, color = K.dim, lineHeight = 15.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        Switch(on)
+    }
+}
+
 @Composable
 fun FilterRows(enabled: Set<ResultFilter>, onToggle: (ResultFilter, Boolean) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = K.gap3), verticalArrangement = Arrangement.spacedBy(K.gap1)) {
         ResultFilter.entries.forEach { f ->
             val on = f in enabled
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.plate)
-                    .border(1.dp, if (on) K.borderStrong else K.border, RoundedCornerShape(14.dp))
-                    .semantics { contentDescription = f.label; toggleableState = if (on) ToggleableState.On else ToggleableState.Off }
-                    .clickable(role = Role.Switch) { onToggle(f, !on) }
-                    .padding(horizontal = K.gap3, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(K.gap3),
-            ) {
-                Box(Modifier.width(22.dp), contentAlignment = Alignment.Center) {
-                    when (f) {
-                        ResultFilter.BUS -> ModeGlyph(Mode.BUS, if (on) K.text else K.dim, 18.dp)
-                        ResultFilter.TRAIN -> ModeGlyph(Mode.TRAIN, if (on) K.text else K.dim, 18.dp)
-                        ResultFilter.LIGHT_RAIL -> ModeGlyph(Mode.TRAM, if (on) K.text else K.dim, 18.dp)
-                        ResultFilter.SHARE_TAXI -> ModeGlyph(Mode.TAXI, if (on) K.text else K.dim, 18.dp)
-                        ResultFilter.TAXI -> ModeGlyph(Mode.TAXI, if (on) K.text else K.dim, 18.dp)
-                        ResultFilter.BIKE -> BikeGlyph(if (on) K.text else K.dim)
-                        ResultFilter.WALK -> WalkGlyph(if (on) K.text else K.dim, 16.dp)
-                    }
+            SwitchRow(f.label, f.desc, on, { onToggle(f, it) }) {
+                when (f) {
+                    ResultFilter.BUS -> ModeGlyph(Mode.BUS, if (on) K.text else K.dim, 18.dp)
+                    ResultFilter.TRAIN -> ModeGlyph(Mode.TRAIN, if (on) K.text else K.dim, 18.dp)
+                    ResultFilter.LIGHT_RAIL -> ModeGlyph(Mode.TRAM, if (on) K.text else K.dim, 18.dp)
+                    ResultFilter.CARMELIT -> CarmelitMark(18.dp)
+                    ResultFilter.RAKAVLIT -> RakavlitMark(18.dp)
+                    ResultFilter.SHARE_TAXI -> ModeGlyph(Mode.TAXI, if (on) K.text else K.dim, 18.dp)
+                    ResultFilter.TAXI -> ModeGlyph(Mode.TAXI, if (on) K.text else K.dim, 18.dp)
+                    ResultFilter.BIKE -> BikeGlyph(if (on) K.text else K.dim)
+                    ResultFilter.WALK -> WalkGlyph(if (on) K.text else K.dim, 16.dp)
                 }
-                Column(Modifier.weight(1f)) {
-                    Text(f.label, fontSize = 14.sp, color = if (on) K.text else K.muted)
-                    Text(f.desc, fontSize = 11.sp, color = K.dim, lineHeight = 15.sp, modifier = Modifier.padding(top = 2.dp))
-                }
-                Switch(on)
             }
         }
     }
 }
 
-/** A pill with a knob, in the accent when on and grey when off. */
 @Composable
 private fun Switch(on: Boolean) {
     val track by animateColorAsState(if (on) K.accent else K.surface4, label = "track")

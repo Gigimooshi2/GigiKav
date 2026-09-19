@@ -49,7 +49,6 @@ private fun StationsBody(model: KavModel, net: Net) {
 @Composable
 private fun StationList(model: KavModel, net: Net) {
     val ctx = LocalContext.current
-    // held by the model: opening a stop disposes this list (see KavModel.stopQuery)
     var q by model::stopQuery
     var locating by remember { mutableStateOf(false) }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -122,8 +121,6 @@ private fun StationList(model: KavModel, net: Net) {
     }
 }
 
-/** Next departures at one stop. Grey, because Israel publishes no real-time feed
- *  and a fake live colour would be a lie. */
 @Composable
 private fun DepartureBoard(model: KavModel, net: Net, stop: Int, onBack: () -> Unit) {
     val t0 = remember(stop) { nowSec() }
@@ -144,7 +141,6 @@ private fun DepartureBoard(model: KavModel, net: Net, stop: Int, onBack: () -> U
             Text(net.name[stop], fontSize = 14.sp, color = K.text)
             val city = net.cityOf(stop)
             val code = net.code.getOrElse(stop) { 0 }
-            // the number on the pole, so this page can be matched against the stop itself
             Text(
                 listOf(
                     city.takeIf { it.isNotBlank() },
@@ -199,7 +195,6 @@ private fun DepartureBoard(model: KavModel, net: Net, stop: Int, onBack: () -> U
     }
 }
 
-/** An offline stop as a place Directions can actually plan with. */
 internal fun placeOf(net: Net, stop: Int) = uk.noammm.kav.data.Moovit.Place(
     name = net.name.getOrElse(stop) { T("Stop", "תחנה") },
     detail = net.cityOf(stop),

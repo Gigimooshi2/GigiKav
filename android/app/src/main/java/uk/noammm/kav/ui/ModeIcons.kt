@@ -21,21 +21,6 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 
-/*
- * Moovit's own vehicle marks, not redrawings of them.
- *
- * TransitType.VehicleType names one drawable per vehicle, ic_transit_type_tram /
- * _subway / _rail / _bus / _ferry / _cable_car / _gondola / _funicular, and this is
- * the pathData out of those eight files, unaltered, on their shared 26x26 viewport.
- * Kav used to hand-draw five geometric approximations and route eight vehicles into
- * them, so a funicular, a gondola and a light rail all came out as the same tram box.
- * Copying the geometry costs a few kilobytes of string and ends the guessing: the
- * Carmelit gets the funicular Moovit draws for it, the Rakavlit the cable car.
- *
- * Only the colour is Kav's. Moovit fills these with ?colorOnSurface and Kav fills them
- * with its own greys (D11), which is the same relationship the palette already has to
- * every other Moovit mark.
- */
 private val MODE_PATHS: Map<Mode, List<String>> = mapOf(
     Mode.TRAM to listOf(
         "M15 0h-4C9.528 0 8.238 0.808 7.544 2H8.77C9.32 1.388 10.115 1 11 1h4c0.885 0 1.68 0.388 2.23 1h1.226C17.762 0.808 16.472 0 15 0z",
@@ -71,7 +56,6 @@ private val MODE_PATHS: Map<Mode, List<String>> = mapOf(
     ),
 )
 
-/** Moovit's viewportWidth/viewportHeight for every ic_transit_type_* drawable. */
 private const val VIEWPORT = 26f
 
 private val pathCache = HashMap<Mode, List<Path>>()
@@ -81,15 +65,6 @@ private fun pathsFor(mode: Mode): List<Path>? = MODE_PATHS[mode]?.let { data ->
     pathCache.getOrPut(mode) { data.map { PathParser().parsePathString(it).toPath() } }
 }
 
-/**
- * The mode's mark rasterised once, [px] pixels square and filled with [ink], on
- * nothing. The map draws it in the middle of a coloured disc, so the ink is the
- * background colour and the disc reads as the vehicle's own colour around it.
- *
- * One cache serves both drawing paths: MapLibre's symbol layer wants an Android
- * bitmap, a Compose canvas wants an ImageBitmap, and a bus painted by the GL layer
- * has to be the same bus the Live tab paints over its own map.
- */
 fun modeMark(mode: Mode, px: Int, ink: Color = K.bg): ImageBitmap =
     markCache.getOrPut(Triple(mode, px, ink.value)) {
         val image = ImageBitmap(px, px)
@@ -107,20 +82,13 @@ fun modeMark(mode: Mode, px: Int, ink: Color = K.bg): ImageBitmap =
         image
     }
 
-/** The name [modeMark] is registered under on a map style, one per vehicle. */
 fun modeIconName(mode: Mode): String = "kav-mode-${mode.name.lowercase(java.util.Locale.US)}"
 
-/** The same mark, centred on [centre], for the canvases that paint their own vehicles. */
 fun DrawScope.drawModeMark(mode: Mode, centre: Offset, span: Float, ink: Color = K.bg) {
     val px = span.toInt().coerceAtLeast(4)
     drawImage(modeMark(mode, px, ink), topLeft = Offset(centre.x - px / 2f, centre.y - px / 2f))
 }
 
-/**
- * A vehicle mark, filled with [tint]. Moovit's geometry for the eight vehicles it
- * names; Kav's own for the two it does not, a share taxi, and the circle that stands
- * in for a route type no feed here uses.
- */
 @Composable
 fun ModeGlyph(mode: Mode, tint: Color = K.dim, size: Dp = 13.dp) {
     val paths = remember(mode) { pathsFor(mode) }
@@ -135,12 +103,6 @@ fun ModeGlyph(mode: Mode, tint: Color = K.dim, size: Dp = 13.dp) {
     }
 }
 
-/**
- * The two marks Moovit has no vehicle type for. A share taxi is route type 8 in the
- * Israeli feed and 715 for the demand-responsive shuttles, and neither is a
- * TransitType.VehicleType, so the car below is Kav's: a cabin over a body, wheels
- * under it, and the roof sign that makes it a taxi rather than a briefcase.
- */
 private fun DrawScope.drawFallback(mode: Mode, tint: Color) {
     val w = size.width
     val h = size.height
@@ -161,13 +123,6 @@ private fun DrawScope.drawFallback(mode: Mode, tint: Color) {
     }
 }
 
-/**
- * A stop's mark: Moovit's img_general_station_* is a filled plate carrying the vehicle
- * in the plate's negative space, and that is what this draws, the same relationship
- * [RailMark] already has to the Israel Railways badge, extended to every vehicle so a
- * railway station stops reading as bare text next to its name. Moovit rounds every
- * plate but the subway's, which is a circle.
- */
 @Composable
 fun StationMark(mode: Mode, size: Dp = 16.dp, plate: Color = K.text, on: Color = K.surface1) {
     val paths = remember(mode) { pathsFor(mode) }
@@ -182,8 +137,6 @@ fun StationMark(mode: Mode, size: Dp = 16.dp, plate: Color = K.text, on: Color =
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * .22f),
             )
         }
-        // the vehicle sits inside the plate at Moovit's own proportions, inset so the
-        // plate reads as a plate rather than a frame the glyph is touching
         val inset = w * .16f
         val span = w - inset * 2f
         scale(span / VIEWPORT, span / VIEWPORT, Offset.Zero) {

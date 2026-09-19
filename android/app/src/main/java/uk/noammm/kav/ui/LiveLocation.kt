@@ -28,11 +28,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Vehicle position and service status from StopsArrivals, drawn over the journey leg. */
-
 private val hm = SimpleDateFormat("HH:mm", Locale.US)
 
-/** Show minutes for an upcoming arrival within the hour, otherwise its clock time. */
 fun whenLabel(t: Long, now: Long = System.currentTimeMillis() / 1000): String {
     val m = ((t - now) / 60).toInt()
     return when {
@@ -43,7 +40,6 @@ fun whenLabel(t: Long, now: Long = System.currentTimeMillis() / 1000): String {
     }
 }
 
-/** Stop names for a whole ride, resolved once through the shared API cache. */
 @Composable
 fun rememberStopNames(ids: List<Int>): Map<Int, Moovit.StopInfo> {
     val wanted = ids.filter { it > 0 }.distinct()
@@ -52,7 +48,6 @@ fun rememberStopNames(ids: List<Int>): Map<Int, Moovit.StopInfo> {
     LaunchedEffect(key) {
         if (wanted.isEmpty()) return@LaunchedEffect
         val s = Online.session ?: return@LaunchedEffect
-        // Publish small parallel batches so circles and stop names appear progressively.
         for (batch in wanted.chunked(6)) {
             val resolved = coroutineScope {
                 batch.map { id -> async(Dispatchers.IO) {
@@ -69,10 +64,6 @@ fun rememberStopNames(ids: List<Int>): Map<Int, Moovit.StopInfo> {
 fun rememberLineRoute(shapeId: Int): List<Pair<Double, Double>> =
     rememberLineRoutes(listOf(shapeId))[shapeId].orEmpty()
 
-/**
- * Several routes at once, keyed on the ids themselves so the number of ids can change
- * between recompositions without breaking Compose's call ordering.
- */
 @Composable
 fun rememberLineRoutes(shapeIds: List<Int>): Map<Int, List<Pair<Double, Double>>> {
     val wanted = shapeIds.filter { it > 0 }.distinct().sorted()
@@ -89,13 +80,6 @@ fun rememberLineRoutes(shapeIds: List<Int>): Map<Int, List<Pair<Double, Double>>
     return out
 }
 
-/**
- * [live] is whether there is a vehicle position to follow, and it tints the button;
- * it does NOT gate the tap. A greyed-out control that cannot say why reads as broken,
- * and the screen behind this one already has the sentence for every case: no live
- * location, not departed yet, canceled here, off its route. Let it be pressed and let
- * that screen answer.
- */
 @Composable
 fun LiveLocationButton(live: Boolean, onClick: () -> Unit) {
     Row(
@@ -120,7 +104,6 @@ fun LiveLocationScreen(
     r: Moovit.Resolved,
     onBack: () -> Unit,
 ) {
-    // the overlay is polled by the caller; read it fresh on every recomposition
     val arrival = r.arrival(leg)
     val info = r.line(leg.lineId)
     val now = System.currentTimeMillis() / 1000
@@ -136,16 +119,17 @@ fun LiveLocationScreen(
         ) {
             val agency = info?.agencyId ?: -1
             val rt = if (info != null) r.routeType(agency) else 3
+            val plate = plateFor(rt, agency)
             Row(
-                Modifier.clip(RoundedCornerShape(10.dp)).background(K.surface1)
+                Modifier.clip(RoundedCornerShape(10.dp)).background(plate?.fill ?: K.surface1)
                     .padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AgencyMark(rt, agency, K.muted, 15.dp)
+                AgencyMark(rt, agency, plate?.ink ?: K.muted, 15.dp)
                 Spacer(Modifier.width(6.dp))
                 Text(
                     leg.shortName.ifBlank { null } ?: info?.number?.ifBlank { null } ?: "#${leg.lineId}",
-                    fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium,
+                    fontSize = 15.sp, color = plate?.ink ?: K.text, fontWeight = FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = 130.dp),
                 )
@@ -174,18 +158,11 @@ fun LiveLocationScreen(
     }
 }
 
-/**
- * The whole route the vehicle is driving, its MVArrival.tripShapeId resolved through
- * V5/Entities/Entity (entity_type 15, MVSyncedEntity.mvTripShape). Drawn grey under
- * your own leg, because most of it is the line's journey rather than your trip: what
- * it did before it reached you, and where it carries on after you get off.
- */
 fun lineRoute(a: Moovit.Arrival?, r: Moovit.Resolved): List<Pair<Double, Double>> {
     if (a == null || a.tripShapeId <= 0) return emptyList()
     return r.shapes[a.tripShapeId] ?: Moovit.cachedShape(a.tripShapeId)
 }
 
-/** The line's shape with the vehicle on it, the picture the feature exists for. */
 @Composable
 private fun VehicleMap(
     leg: Moovit.Leg,
@@ -197,13 +174,10 @@ private fun VehicleMap(
     val pulse = rememberLivePulse()
     val points = leg.shape + approach +
         listOfNotNull(a?.takeIf { it.hasLocation }?.let { it.lat to it.lon })
-    // The line's whole route goes down first, not your trip, so it is grey, and
-    // your own leg sits on top of it, all drawn by MapLibre in the ground's frame.
     val geometry = remember(approach, leg) {
         MapGeometry(
             lines = listOf(
                 MapLine(approach, K.routeIdle, 3f, casing = 7f),
-                // The journey leg shares the trip map's subdued route accent.
                 MapLine(leg.shape, K.route, 4f, casing = 8f),
             ),
             dots = listOf(
@@ -221,8 +195,6 @@ private fun VehicleMap(
         animatedOverlay = { proj ->
             if (a != null && a.hasLocation) {
                 val p = proj.point(a.lat, a.lon)
-                // OUT_OF_SHAPE means the vehicle has left its planned route; show the gap
-                // rather than snapping it onto the line and pretending otherwise.
                 if (a.vehicleStatus == 2) {
                     var nearest = proj.point(leg.shape[0].first, leg.shape[0].second)
                     var best = Float.MAX_VALUE
@@ -297,7 +269,6 @@ private fun StatusBlock(
     }
 }
 
-/** Arrival indexes refer to the whole line; a journey leg begins at the boarding stop. */
 internal fun nextStopOnLeg(leg: Moovit.Leg, arrival: Moovit.Arrival?): Int? {
     if (arrival == null || arrival.nextStopIndex < 0 || arrival.stopIndex < 0) return null
     return leg.stops.getOrNull(arrival.nextStopIndex - arrival.stopIndex)

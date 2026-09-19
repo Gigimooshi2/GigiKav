@@ -54,33 +54,21 @@ import java.util.Date
 import java.util.Locale
 import kotlin.coroutines.coroutineContext
 
-/** Process-wide Moovit online session + the stop DB as far as it has been paged. */
 object Online {
     @Volatile var session: MoovitSession? = null
     @Volatile var stops: List<Moovit.Stop> = emptyList()
-    /** the id the page walk continues from, until [stopsComplete] */
     @Volatile var stopsNext: Int = 1
     @Volatile var stopsComplete: Boolean = false
 }
 
 private val hm = SimpleDateFormat("HH:mm", Locale.US)
 
-/**
- * What the Live tab has opened on top of its map: nothing, one vehicle, or one stop.
- * A vehicle remembers the stop it was opened from, so backing out of it goes back to
- * that stop rather than all the way out to the map.
- */
 private sealed interface LiveFocus {
     data class Vehicle(val tripId: Long, val from: Int? = null) : LiveFocus
     data class Stop(val id: Int) : LiveFocus
-    /** A line at a stop, carried by what Moovit calls it: the bundle is matched on this. */
     data class Line(val number: String, val destination: String, val from: Int) : LiveFocus
 }
 
-/**
- * A vehicle the Live tab is showing: the arrival that carries its position, at the
- * nearest of our stops it has yet to reach, and what is known about its line.
- */
 private class Tracked(
     val arrival: Moovit.Arrival,
     val stop: Moovit.Stop?,
@@ -89,31 +77,19 @@ private class Tracked(
     val routeType: Int,
 ) {
     val tripId get() = arrival.tripId
-    /** the number on the bus; an ellipsis while it is being looked up, the id if that failed */
     val number get() = line?.number?.ifBlank { null } ?: if (pending) "…" else "#${arrival.lineId}"
     val pending get() = line == null && !looked
     val eta get() = arrival.rtUtc.takeIf { it > 0 } ?: arrival.staticUtc
 }
 
-/**
- * Live vehicles on a monochrome map. This is ONLINE mode: it registers a throwaway
- * Moovit identity and polls Moovit's servers (~every 20 s, the cadence Moovit itself
- * uses). Every vehicle dot is a real GPS fix. The banner states the trade honestly.
- *
- * The stops around you are polled for arrivals; every arrival that carries a vehicle
- * position is a vehicle on the map and in the list, named by the number on the bus
- * rather than Moovit's internal line id, and each one opens on its own route.
- */
 @Composable
 fun LiveScreen(model: KavModel) {
     val ctx = LocalContext.current
-    val here = model.here ?: (32.0759 to 34.7745)   // fallback: central Tel Aviv until located
+    val here = model.here ?: (32.0759 to 34.7745)
     val located = model.here != null
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) requestLocationOnce(ctx) { model.here = it }
     }
-    // Ask for location the first time the Live tab is opened, so we can find the
-    // stops actually near you (falls back to central Tel Aviv until then).
     LaunchedEffect(Unit) {
         if (model.here == null) {
             if (hasLocationPermission(ctx)) requestLocationOnce(ctx) { model.here = it }
@@ -122,10 +98,6 @@ fun LiveScreen(model: KavModel) {
     }
     var status by remember { mutableStateOf(T("connecting to Moovit…", "מתחברים ל-Moovit…")) }
     var loading by remember { mutableStateOf(true) }
-    // The stop database is paged by id and the ids are nowhere in particular, so until
-    // the walk is finished "the stops near you" are only the nearest of those seen so
-    // far, which can be a different district entirely. None of it is worth showing, so
-    // the map and the list wait behind a bar that says how far the walk has got.
     var scanned by remember {
         mutableFloatStateOf(if (Online.stopsComplete) 1f else Online.stopsNext.toFloat() / Moovit.STOP_ID_CEILING)
     }
@@ -154,24 +126,14 @@ fun LiveScreen(model: KavModel) {
             found = Online.stops.size
             stopsReady = Online.stopsComplete
             scanned = if (Online.stopsComplete) 1f else Online.stopsNext.toFloat() / Moovit.STOP_ID_CEILING
-            // A walking radius rather than a flat count, capped where one StopsArrivals
-            // request stays reasonable on mobile data (~135 KB at 120 stops, measured).
             fun nearby() = Moovit.nearbyStops(Online.stops, here.first, here.second, k = 120, radiusKm = 1.5)
             if (Online.stops.isNotEmpty()) near = withContext(Dispatchers.Default) { nearby() }
-            // The database is paged by id, and the ids are nowhere in particular, so the
-            // first pages are not the stops near you. Walk the whole range once, four
-            // blocks of ten pages at a time, tightening the stops around you after every
-            // block, and keep the result so the next launch starts complete.
             if (!Online.stopsComplete) launch(Dispatchers.IO) {
                 var blocks = 0
                 while (isActive && !Online.stopsComplete) {
                     val from = Online.stopsNext
-                    // counted per page rather than per block, so the bar moves forty
-                    // times across a block instead of standing still through all of it
                     val pages = java.util.concurrent.atomic.AtomicInteger(0)
                     val block = try {
-                        // inside its own scope, so one failed page fails the block and is
-                        // caught here, rather than taking the whole effect down with it
                         coroutineScope {
                             (0 until 4).map { i ->
                                 async {
@@ -185,8 +147,6 @@ fun LiveScreen(model: KavModel) {
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        // the walk retries for as long as the tab is open, and with the
-                        // list held back a silent bar would be a screen with no reason
                         stopsError = T("Could not load stops · retrying", "לא ניתן היה לטעון תחנות · מנסים שוב")
                         status = stopsError.orEmpty()
                         scanned = ((from - 1).toFloat() / Moovit.STOP_ID_CEILING).coerceIn(0f, 1f)
@@ -213,10 +173,6 @@ fun LiveScreen(model: KavModel) {
                     val (found, poll) = withContext(Dispatchers.IO) { Moovit.stopArrivals(s, ids) }
                     arrivals = found; pollSecs = poll.coerceIn(10, 60); loading = false
                     val tracked = found.values.filter { it.hasLocation }
-                    // Until the crawl finishes these are the nearest stops OF THOSE KNOWN
-                    // SO FAR, and the database is paged by id, not by geography, so that
-                    // set can be nowhere near you. Say so plainly instead of appending a
-                    // footnote to a sentence that otherwise claims to have looked around.
                     status = if (!Online.stopsComplete) {
                         val pct = (Online.stopsNext.toFloat() / Moovit.STOP_ID_CEILING * 100)
                             .toInt().coerceIn(0, 99)
@@ -229,8 +185,6 @@ fun LiveScreen(model: KavModel) {
                             "${tracked.map { it.tripId }.distinct().size} כלי רכב בזמן אמת · ${ids.size} תחנות",
                         )
                     }
-                    // The number on the bus lives in its line group: one lookup per line,
-                    // several at a time, soonest vehicles first, shown as each batch lands.
                     val missing = tracked.sortedBy { it.rtUtc.takeIf { t -> t > 0 } ?: it.staticUtc }
                         .map { it.lineId }.distinct().filter { it !in lines }
                     for (batch in missing.chunked(8)) {
@@ -259,8 +213,6 @@ fun LiveScreen(model: KavModel) {
         }
     }
 
-    // One vehicle appears at every stop of ours it has yet to reach; show it once, at
-    // the first of them, and in the order it will get there.
     val stopsById = remember(near) { near.associateBy { it.id } }
     val vehicles = remember(arrivals, lines, modes, stopsById) {
         arrivals.values.filter { it.hasLocation }.groupBy { it.tripId }.values.map { at ->
@@ -281,8 +233,6 @@ fun LiveScreen(model: KavModel) {
         targetState = focus,
         modifier = Modifier.fillMaxSize(),
         transitionSpec = {
-            // a vehicle opened from a stop sits one level deeper than it; every other
-            // move towards something is deeper, and towards nothing is back out
             val deeper = targetState != null &&
                 (initialState == null || (targetState !is LiveFocus.Stop && initialState is LiveFocus.Stop))
             if (deeper) forward() else backward()
@@ -366,13 +316,6 @@ fun LiveScreen(model: KavModel) {
                     stopsError?.let { Text(it, fontSize = 11.sp, color = K.problem, lineHeight = 15.sp) }
                 }
             }
-            // What sits under the map: nothing yet, the search, or the vehicles. Each
-            // is a different height, and swapping one for the next used to resize the
-            // map between two frames and drop the new text in fully formed. The size
-            // is tweened and the words are faded through instead, so the map opens out
-            // into the space rather than jumping into it. Keyed on which of the three
-            // is showing, never on the vehicle list itself, or the 20s refresh would
-            // replay the whole transition every time it landed.
             val below = when {
                 !stopsReady -> 0
                 loading -> 1
@@ -406,14 +349,6 @@ fun LiveScreen(model: KavModel) {
 
 private val K.glassPlate get() = androidx.compose.ui.graphics.Color(0xCC000000)
 
-/**
- * Where a line goes, opened from a stop in the Live tab.
- *
- * Live is online and the route drawing is the offline bundle's, and the two share
- * nothing: Moovit knows a line by the number on the bus and where it says it is
- * headed, the bundle knows routes by index. So the bundle is opened here, the same
- * way the map picker opens it, and the line is matched across.
- */
 @Composable
 private fun LiveLineRoute(model: KavModel, line: LiveFocus.Line, at: Moovit.Stop?, onBack: () -> Unit) {
     val ctx = LocalContext.current
@@ -431,7 +366,6 @@ private fun LiveLineRoute(model: KavModel, line: LiveFocus.Line, at: Moovit.Stop
         }
     }
     val open = net
-    // null while the match is still running, -1 once it has come back empty
     var route by remember(open) { mutableStateOf<Int?>(null) }
     LaunchedEffect(open) {
         val n = open ?: return@LaunchedEffect
@@ -462,24 +396,12 @@ private fun LiveLineRoute(model: KavModel, line: LiveFocus.Line, at: Moovit.Stop
     }
 }
 
-/**
- * The bundle's route that best answers a Moovit line seen at a stop, or -1.
- *
- * The MOT feed emits one GTFS route row per service pattern, so a single line is many
- * rows and picking the first one with the right number lands on an arbitrary variant.
- * Three things narrow it: the number has to match, the variant should actually call at
- * the stop the rider is standing at (found by position, because the stop ids do not
- * agree between the two sides either), and its far end should read like the
- * destination Moovit gave. Longest-pattern breaks any remaining tie, which is the same
- * stand-in for "the line" that the Lines tab already uses.
- */
 private fun matchRoute(net: Net, number: String, destination: String, lat: Double, lon: Double): Int {
     val want = number.trim()
     if (want.isEmpty()) return -1
     val candidates = (0 until net.nRoutes).filter { net.rShort[it].trim() == want }
     if (candidates.isEmpty()) return -1
     val wanted = candidates.toHashSet()
-    // one pass for the longest trip on each candidate, not a full scan per route
     val longest = HashMap<Int, Int>()
     for (t in net.tripRoute.indices) {
         val r = net.tripRoute[t]
@@ -507,13 +429,6 @@ private fun matchRoute(net: Net, number: String, destination: String, lat: Doubl
     return bestRoute
 }
 
-/**
- * The live map: real tiles, the stops around you as circles, and every tracked vehicle.
- *
- * This used to be a hand-rolled equirectangular canvas with no basemap at all, which is
- * why the tab read as a grey rectangle, there was nothing under the dots to be a map.
- * It now shares the same tiled projection as every other map in the app.
- */
 @Composable
 private fun LiveMap(
     center: Pair<Double, Double>,
@@ -523,16 +438,9 @@ private fun LiveMap(
     onStop: (Moovit.Stop) -> Unit,
 ) {
     val pulse = rememberLivePulse()
-    // A dot is 16 dp across and no finger is that accurate, so the target around it is
-    // the one a thumb actually has, and the nearest vehicle inside it wins.
     val reach = with(LocalDensity.current) { 22.dp.toPx() }
-    // A stop is the smaller circle and it sits still, so its target is a little wider
-    // than the ring drawn on it; a vehicle standing at one still wins the tap.
     val stopReach = with(LocalDensity.current) { 20.dp.toPx() }
-    // keep the frame steady while vehicles move: fit the stops and you, not the traffic
     val points = remember(stops, center) { stops.map { it.lat to it.lon } + center }
-    // stops as circles, the way Moovit rings them on its own map, and you; both
-    // handed to MapLibre so they sit still on the ground while the camera moves
     val geometry = remember(stops, center) {
         MapGeometry(dots = stops.flatMap { st ->
             listOf(
@@ -546,7 +454,6 @@ private fun LiveMap(
         ))
     }
     TileMap(points, Modifier.fillMaxSize(), geometry = geometry, animatedOverlay = { proj ->
-        // tracked vehicles, breathing
         for (v in vehicles) {
             val a = v.arrival
             val o = proj.point(a.lat, a.lon)
@@ -565,19 +472,20 @@ private fun LiveMap(
     })
 }
 
-/** The number on the bus in a plate, with the mark of the kind of vehicle it is. */
 @Composable
 private fun LinePlate(v: Tracked) {
+    val agency = v.line?.agencyId ?: -1
+    val plate = plateFor(v.routeType, agency)
     Row(
-        Modifier.clip(RoundedCornerShape(7.dp)).background(K.plate)
-            .border(1.dp, K.borderStrong, RoundedCornerShape(7.dp))
+        Modifier.clip(RoundedCornerShape(7.dp)).background(plate?.fill ?: K.plate)
+            .border(1.dp, plate?.edge ?: K.borderStrong, RoundedCornerShape(7.dp))
             .padding(start = 6.dp, end = 8.dp, top = 3.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AgencyMark(v.routeType, v.line?.agencyId ?: -1, K.muted, 15.dp)
+        AgencyMark(v.routeType, agency, plate?.ink ?: K.muted, 15.dp)
         Spacer(Modifier.width(5.dp))
         Text(
-            v.number, fontSize = 16.sp, color = K.text, fontWeight = FontWeight.Medium,
+            v.number, fontSize = 16.sp, color = plate?.ink ?: K.text, fontWeight = FontWeight.Medium,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 96.dp),
         )
     }
@@ -593,9 +501,6 @@ private fun LiveList(vehicles: List<Tracked>, now: Long, modifier: Modifier, onS
                 "Nothing tracked near you right now. Vehicles appear here as soon as one of your stops has a bus reporting its position.",
                 "אין כרגע כלי רכב במעקב בסביבתכם. כלי רכב יופיעו כאן ברגע שאחת התחנות שלכם תקבל דיווח מיקום מאוטובוס.",
             ),
-            // The tabs float over the page, so this note has to step over them itself.
-            // Without the inset it was laid out in the strip the bar covers: invisible,
-            // and it pushed the map's bottom edge down under the bar with it.
             Modifier.padding(horizontal = K.gap4, vertical = K.gap3)
                 .padding(bottom = LocalBottomBarInset.current),
         )
@@ -633,13 +538,8 @@ private fun LiveList(vehicles: List<Tracked>, now: Long, modifier: Modifier, onS
     }
 }
 
-/**
- * One vehicle on its own: the whole route it is driving, where it is on it, and when
- * it reaches the stop near you. It keeps reading the tab's polls, so the dot moves.
- */
 @Composable
 private fun LiveVehicleScreen(v: Tracked?, now: Long, onBack: () -> Unit) {
-    // the last one seen stays on screen if a poll drops it, rather than a blank page
     var last by remember { mutableStateOf(v) }
     if (v != null) last = v
     val shown = v ?: last
@@ -715,6 +615,7 @@ private fun LiveVehicleScreen(v: Tracked?, now: Long, onBack: () -> Unit) {
             Spacer(Modifier.height(K.gap3))
             LiveFact(T("Next of your stops", "התחנה הבאה שלכם"), stopName(stop, a.stopId))
             LiveFact(T("Arriving", "הגעה"), whenLabel(shown.eta, now))
+            if (a.platform.isNotBlank()) LiveFact(T("Platform", "רציף"), a.platform)
             val away = a.stopsAway
             if (away >= 0) LiveFact(T("Stops away", "תחנות"), if (away == 0) T("at the stop", "בתחנה") else "$away")
             if (route.isEmpty() && a.tripShapeId > 0) LiveFact(T("Route", "מסלול"), T("loading…", "טוען…"))
@@ -723,14 +624,6 @@ private fun LiveVehicleScreen(v: Tracked?, now: Long, onBack: () -> Unit) {
     }
 }
 
-/**
- * One stop on its own: everything calling at it, soonest first. The tab is already
- * polling this stop for arrivals in order to find vehicles; this reads that same poll
- * the other way round, by stop rather than by vehicle, so it costs no extra request.
- *
- * A vehicle reporting its position is tappable and opens on its own route; one that is
- * not is still a departure, and is listed as the timetable has it.
- */
 @Composable
 private fun LiveStopScreen(
     stop: Moovit.Stop?,
@@ -747,8 +640,6 @@ private fun LiveStopScreen(
         arrivals.values.filter { it.stopId == stopId }
             .sortedBy { a -> a.rtUtc.takeIf { it > 0 } ?: a.staticUtc }
     }
-    // The tab looks up the number only on a line it is tracking a vehicle of. Here
-    // every line calling at the stop is on screen, so the rest are looked up now.
     var extraLines by remember { mutableStateOf<Map<Int, Moovit.LineInfo?>>(emptyMap()) }
     var extraModes by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
     val lineIds = remember(due) { due.map { it.lineId }.distinct() }
@@ -836,9 +727,6 @@ private fun LiveStopScreen(
                 val live = v.arrival.hasLocation
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(K.rControl))
-                        // A line with nothing reporting used to be a dead row: the one
-                        // thing you can still be told about it is where it goes, so
-                        // that is what it opens now.
                         .clickable(
                             role = Role.Button,
                             onClickLabel = if (live) T("Follow this vehicle", "מעקב אחר כלי הרכב")
@@ -852,12 +740,18 @@ private fun LiveStopScreen(
                     horizontalArrangement = Arrangement.spacedBy(K.gap3),
                 ) {
                     LinePlate(v)
-                    Text(
-                        v.line?.destination?.ifBlank { null }?.let { T("to $it", "אל $it") }
-                            ?: if (v.pending) T("Looking up the line…", "מאתרים את הקו…") else T("Line ${v.number}", "קו ${v.number}"),
-                        fontSize = 14.sp, color = K.text, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            v.line?.destination?.ifBlank { null }?.let { T("to $it", "אל $it") }
+                                ?: if (v.pending) T("Looking up the line…", "מאתרים את הקו…") else T("Line ${v.number}", "קו ${v.number}"),
+                            fontSize = 14.sp, color = K.text, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (v.arrival.platform.isNotBlank()) {
+                            Spacer(Modifier.height(K.gap1))
+                            PlatformTag(v.arrival.platform)
+                        }
+                    }
                     if (live) LiveGlyph(if (v.arrival.vehicleStatus == 2) K.problem else K.live, 11.dp)
                     Text(
                         whenLabel(v.eta, now), style = Mono, fontSize = 13.sp,

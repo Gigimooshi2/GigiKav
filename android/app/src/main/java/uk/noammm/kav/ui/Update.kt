@@ -25,10 +25,6 @@ import uk.noammm.kav.KavModel
 import uk.noammm.kav.R
 import uk.noammm.kav.data.Updates
 
-/**
- * "A newer Kav is out." Shown at launch while a newer release exists; saying No
- * closes it for this launch only, and the dot on Settings keeps the offer open.
- */
 @Composable
 fun UpdatePrompt(model: KavModel) {
     val release = model.update ?: return
@@ -64,7 +60,6 @@ fun UpdatePrompt(model: KavModel) {
     }
 }
 
-/** The launcher mark on its own black plate, as the home screen shows it. */
 @Composable
 private fun AppIcon(size: androidx.compose.ui.unit.Dp) {
     Box(
@@ -122,7 +117,6 @@ private fun UpdateButton(model: KavModel, modifier: Modifier = Modifier, onClick
     }
 }
 
-/** The same offer inside Settings, for later, and a way to look again. */
 @Composable
 fun UpdateSection(model: KavModel) {
     val ctx = LocalContext.current

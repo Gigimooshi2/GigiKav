@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The pinned trip, unfolded: Moovit's own arrangement — the step, a rule, then
+     an action row of End trip and the two page-through chevrons. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingTop="2dp">
+
+    <TextView
+        android:id="@+id/notice_title"
+        style="@style/TextAppearance.Compat.Notification.Title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:maxLines="2"
+        android:ellipsize="end" />
+
+    <TextView
+        android:id="@+id/notice_text"
+        style="@style/TextAppearance.Compat.Notification.Info"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:maxLines="2"
+        android:ellipsize="end" />
+
+    <!-- an ImageView, not a View: RemoteViews only inflates its whitelisted
+         classes, and a bare View crashes the whole foreground service -->
+    <ImageView
+        android:id="@+id/notice_rule"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="10dp"
+        android:scaleType="fitXY"
+        android:background="#33888888"
+        android:contentDescription="@null" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:minHeight="44dp">
+
+        <TextView
+            android:id="@+id/notice_end"
+            style="@style/TextAppearance.Compat.Notification.Info"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center_vertical"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/notice_prev"
+            android:layout_width="52dp"
+            android:layout_height="44dp"
+            android:padding="10dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_step_prev"
+            android:contentDescription="@null" />
+
+        <ImageView
+            android:id="@+id/notice_next"
+            android:layout_width="52dp"
+            android:layout_height="44dp"
+            android:padding="10dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_step_next"
+            android:contentDescription="@null" />
+    </LinearLayout>
+</LinearLayout>

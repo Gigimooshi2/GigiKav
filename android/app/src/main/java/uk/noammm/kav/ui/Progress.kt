@@ -6,16 +6,12 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
-/** A position fix: where the phone was, when (epoch seconds), and how fast it was going. */
 data class Fix(val lat: Double, val lon: Double, val at: Long, val speed: Float = 0f)
 
-/** Older than this and a fix no longer says where you are, the clock takes over. */
 private const val FRESH_S = 150L
 
 internal fun Fix.isFresh(now: Long) = now - at <= FRESH_S
 internal fun Fix.distanceTo(p: Pair<Double, Double>) = metres(lat, lon, p.first, p.second)
-
-/* geometry on a small patch of the earth */
 
 private class Flat(lat0: Double, lon0: Double) {
     private val kx = cos(Math.toRadians(lat0)) * 111_320.0
@@ -25,7 +21,6 @@ private class Flat(lat0: Double, lon0: Double) {
     fun y(lat: Double) = (lat - lat0) * ky
 }
 
-/** Metres from a point to the nearest point of a polyline. */
 internal fun distanceToPath(lat: Double, lon: Double, path: List<Pair<Double, Double>>): Double {
     if (path.isEmpty()) return Double.MAX_VALUE
     if (path.size == 1) return metres(lat, lon, path[0].first, path[0].second)
@@ -44,21 +39,6 @@ internal fun distanceToPath(lat: Double, lon: Double, path: List<Pair<Double, Do
     return best
 }
 
-/**
- * How far along a polyline, in metres from its start, the point nearest to (lat, lon) sits.
- *
- * Which segment is nearest, and how far along that segment the foot of the perpendicular
- * falls, are worked out on a flat plane pinned to the query point: over the few metres
- * that decide between neighbouring segments it is exact enough. The distance returned is
- * accumulated with [metres] instead of in that plane, because the answer is handed
- * straight back to [pointAlong], which walks the line in [metres]. The plane's scale is
- * about a tenth of a percent away from it, which is nothing across a stop and seventeen
- * metres along a twenty-kilometre ride, and it runs long: the answer can exceed the line
- * it measures. At a stop mid-ride that slides the circle a bus-length down the road; at
- * the far end it is swallowed, because [pointAlong] clamps an overshoot to the last point
- * and lands where it should have anyway. Both halves of the round trip have to count in
- * the same units or the point that comes back out is not the point that went in.
- */
 internal fun alongPath(lat: Double, lon: Double, path: List<Pair<Double, Double>>): Double {
     if (path.size < 2) return 0.0
     val f = Flat(lat, lon)
@@ -78,7 +58,6 @@ internal fun alongPath(lat: Double, lon: Double, path: List<Pair<Double, Double>
     return bestAlong
 }
 
-/** Where the polyline is heading at a point on it, in degrees from north. */
 internal fun bearingAlong(lat: Double, lon: Double, path: List<Pair<Double, Double>>, lookahead: Double = 40.0): Float? {
     if (path.size < 2) return null
     val at = alongPath(lat, lon, path)
@@ -89,7 +68,6 @@ internal fun bearingAlong(lat: Double, lon: Double, path: List<Pair<Double, Doub
     return bearing(a.first, a.second, b.first, b.second)
 }
 
-/** The point a given number of metres along the polyline. */
 internal fun pointAlong(path: List<Pair<Double, Double>>, metresAlong: Double): Pair<Double, Double>? {
     if (path.isEmpty()) return null
     if (path.size == 1 || metresAlong <= 0.0) return path.first()
@@ -106,7 +84,6 @@ internal fun pointAlong(path: List<Pair<Double, Double>>, metresAlong: Double): 
     return path.last()
 }
 
-/** Compass bearing from one point to another, degrees from north. */
 internal fun bearing(la1: Double, lo1: Double, la2: Double, lo2: Double): Float {
     val p1 = Math.toRadians(la1); val p2 = Math.toRadians(la2)
     val dl = Math.toRadians(lo2 - lo1)
@@ -115,7 +92,6 @@ internal fun bearing(la1: Double, lo1: Double, la2: Double, lo2: Double): Float 
     return ((Math.toDegrees(kotlin.math.atan2(y, x)) + 360.0) % 360.0).toFloat()
 }
 
-/** The polyline split where a point projects onto it: what is behind, what is ahead. */
 internal fun splitPath(path: List<Pair<Double, Double>>, lat: Double, lon: Double): Pair<List<Pair<Double, Double>>, List<Pair<Double, Double>>> {
     if (path.size < 2) return path to emptyList()
     val at = alongPath(lat, lon, path)
@@ -131,12 +107,9 @@ internal fun splitPath(path: List<Pair<Double, Double>>, lat: Double, lon: Doubl
     return path to emptyList()
 }
 
-/* which step of the journey the rider is on */
-
 private fun rideOf(step: Step.Wait, chosen: Map<Int, Int>) = boardingChoice(step.ride, step.wait, chosen[step.legIndex] ?: 0).first
 private fun rideOf(step: Step.Ride, chosen: Map<Int, Int>) = boardingChoice(step.ride, step.wait, chosen[step.legIndex] ?: 0).first
 
-/** Where a step ends: the point that, reached, means the next one has begun. */
 internal fun stepTarget(step: Step, r: Moovit.Resolved, chosen: Map<Int, Int>): Pair<Double, Double>? = when (step) {
     is Step.Start -> step.focus.firstOrNull()
     is Step.Walk -> r.stop(step.toStop)?.point ?: step.leg.shape.lastOrNull()
@@ -147,17 +120,12 @@ internal fun stepTarget(step: Step, r: Moovit.Resolved, chosen: Map<Int, Int>): 
     is Step.Arrive -> step.focus.lastOrNull()
 }
 
-/** The departure the rider is waiting for: the live one where the service has it. */
 private fun departureOf(step: Step.Wait, r: Moovit.Resolved, chosen: Map<Int, Int>): Moovit.Departure {
     val ride = rideOf(step, chosen)
     return r.departures(ride, step.wait).firstOrNull { it.tripId == ride.tripId }
         ?: Moovit.Departure(ride.tripId, ride.dep)
 }
 
-/**
- * Is the rider plainly on this step's ground? Used to catch up after a gap in fixes,
- * a phone that lost the sky inside a station and finds it again on the bus.
- */
 private fun onStep(step: Step, r: Moovit.Resolved, chosen: Map<Int, Int>, fix: Fix): Boolean = when (step) {
     is Step.Walk -> {
         val start = step.leg.shape.firstOrNull()
@@ -176,7 +144,6 @@ private fun onStep(step: Step, r: Moovit.Resolved, chosen: Map<Int, Int>, fix: F
     else -> false
 }
 
-/** Is this step over? With a fresh fix the ground decides; without one, the clock. */
 private fun done(step: Step, r: Moovit.Resolved, chosen: Map<Int, Int>, now: Long, fix: Fix?): Boolean {
     val target = stepTarget(step, r, chosen)
     return when (step) {
@@ -196,8 +163,6 @@ private fun done(step: Step, r: Moovit.Resolved, chosen: Map<Int, Int>, now: Lon
         }
         is Step.Ride -> {
             val ride = rideOf(step, chosen)
-            // The stop's own point can sit across the road from where the driven path
-            // ends, so the path's end answers too: within 60 m of it the ride is over.
             (fix != null && ride.shape.isNotEmpty() && fix.distanceTo(ride.shape.last()) < 60) ||
                 if (fix != null && target != null) fix.distanceTo(target) < 45 else now >= ride.arr + 60
         }
@@ -207,30 +172,18 @@ private fun done(step: Step, r: Moovit.Resolved, chosen: Map<Int, Int>, now: Lon
     }
 }
 
-/**
- * The rider was aboard this ride and the ground says it is over: their fix projects
- * onto the last stretch of its path. True both standing at the stop and blocks away
- * down a side street, where the nearest point of the ride is still its end. A fix
- * that projects mid-path, however far off the path it strays, keeps this false — a
- * wild fix must not end a ride that may still be moving.
- */
 private fun rideLeftBehind(step: Step.Ride, chosen: Map<Int, Int>, fix: Fix): Boolean {
     val shape = rideOf(step, chosen).shape
     if (shape.size < 2) return false
     return alongPath(fix.lat, fix.lon, shape) > pathLength(shape) - 60
 }
 
-/** The polyline's whole length in metres. */
 private fun pathLength(path: List<Pair<Double, Double>>): Double {
     var m = 0.0
     for (i in 0 until path.lastIndex) m += metres(path[i].first, path[i].second, path[i + 1].first, path[i + 1].second)
     return m
 }
 
-/**
- * The step the rider is on, given where they were last seen and what time it is.
- * Never goes backwards: a step once passed stays passed, however the fixes wander.
- */
 internal fun journeyProgress(
     steps: List<Step>,
     current: Int,
@@ -245,17 +198,6 @@ internal fun journeyProgress(
     if (live != null) {
         for (k in steps.lastIndex downTo i + 1) {
             if (!onStep(steps[k], r, chosen, live)) continue
-            // Never leap over a ride that is still under way. A transfer walk runs
-            // between two stops on the same corridor the bus is driving down, so
-            // "within 45 m of the walk path" goes true while the rider is still sitting
-            // on the bus a stop short of getting off, and the screen jumped to
-            // "Walk 3 min to…" before they had arrived anywhere. A nearer step can
-            // still catch up: only the ones on the far side of the ride are refused.
-            // The ride the rider is on holds its veto only while they might still be
-            // aboard: once their fix projects onto the tail of its path they have
-            // plainly got off, even when the moment of standing at the stop fell
-            // between fixes and "done" never saw it. Rides further ahead stay strict —
-            // a fix near the end of a path never ridden proves nothing.
             if ((i until k).any { j ->
                     steps[j] is Step.Ride && !done(steps[j], r, chosen, now, live) &&
                         !(j == i && rideLeftBehind(steps[j] as Step.Ride, chosen, live))
@@ -269,34 +211,12 @@ internal fun journeyProgress(
     return i
 }
 
-/** How near its own path a rider must be to count as standing on a walk. */
 internal const val ON_WALK_M = 45.0
 
-/**
- * Within this of the walk's first point counts as on it too. The fixes that end a
- * ride land where the bus put the rider, and the walk's own polyline can start
- * across the junction from there: the stop's registered point is not the kerb, and
- * a phone that has just left a bus scatters. Being at the walk's start IS being on
- * the walk, however far the polyline's first segment sits.
- */
 internal const val AT_WALK_START_M = 80.0
 
-/**
- * A walk camera that has engaged lets go only past this. Urban fixes wander tens of
- * metres off a pavement; without the slack the windscreen flaps in and out around
- * [ON_WALK_M] the whole way. Past it the rider is plainly not walking this walk,
- * and the map goes back to framing the walk itself.
- */
 internal const val OFF_WALK_M = 120.0
 
-/**
- * Should the walk camera hold this rider? Engaging takes standing on the walk
- * ([ON_WALK_M] of its path) or at its start ([AT_WALK_START_M] of its first point,
- * the just-alighted case); a camera already [held] keeps its grip to [OFF_WALK_M].
- * Reading a walk card early is not this gate's problem: the pager refuses to follow
- * a card that is not the current step at all, and the current step cannot become
- * the walk while a ride is still under way.
- */
 internal fun onWalkNow(lat: Double, lon: Double, path: List<Pair<Double, Double>>, held: Boolean): Boolean {
     if (path.isEmpty()) return true
     val d = distanceToPath(lat, lon, path)
@@ -306,14 +226,6 @@ internal fun onWalkNow(lat: Double, lon: Double, path: List<Pair<Double, Double>
     return metres(lat, lon, s.first, s.second) <= AT_WALK_START_M
 }
 
-/**
- * How far the ride has come, in stops: the whole part is how many stops are behind,
- * the fraction how much of the road to the next one is already covered. The rail
- * greys with the ground, the way the route greys on the map, instead of flipping a
- * whole segment on arrival. Sources, best first: the tracked vehicle's own position
- * on the route; the phone's fresh fix on it; the operator's stop indices, which only
- * know whole stops. Below zero, nobody knows.
- */
 internal fun stopsProgress(
     ride: Moovit.Leg,
     stops: Map<Int, Moovit.StopInfo>,
@@ -327,7 +239,6 @@ internal fun stopsProgress(
             it.hasLocation && it.stopIndex >= 0 && it.nextStopIndex > it.stopIndex &&
                 distanceToPath(it.lat, it.lon, shape) < 80
         }
-        // a fix still standing at the boarding stop proves nothing about riding
         val live = fix?.takeIf {
             it.isFresh(now) && distanceToPath(it.lat, it.lon, shape) < 80 &&
                 alongPath(it.lat, it.lon, shape) >= 60

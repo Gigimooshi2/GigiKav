@@ -22,23 +22,35 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uk.noammm.kav.KavModel
 import uk.noammm.kav.data.Moovit
+import uk.noammm.kav.data.MoovitLink
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** A trip map and summary followed by its steps, with navigation and live tracking. */
+private fun shareTrip(ctx: android.content.Context, trip: Moovit.Itinerary, fromLabel: String, toLabel: String) {
+    val from = trip.legs.firstOrNull { it.shape.isNotEmpty() }?.shape?.first()
+    val to = trip.legs.lastOrNull { it.shape.isNotEmpty() }?.shape?.last() ?: return
+    val depMs = trip.dep * 1000
+    val url = MoovitLink.share(
+        fromLabel, from?.first, from?.second, toLabel, to.first, to.second,
+        departMs = if (depMs > System.currentTimeMillis()) depMs else 0L,
+        rides = trip.rides.map { MoovitLink.Ride(it.lineId, it.tripId, it.dep) },
+    )
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+        .setType("text/plain")
+        .putExtra(
+            android.content.Intent.EXTRA_TEXT,
+            T("$fromLabel → $toLabel\n$url", "$fromLabel ← $toLabel\n$url"),
+        )
+    runCatching {
+        ctx.startActivity(android.content.Intent.createChooser(send, T("Share trip", "שיתוף נסיעה")))
+    }
+}
 
 private val hm = SimpleDateFormat("HH:mm", Locale.US)
 
 private enum class Node { ORIGIN, WALK, BOARD, RIDE, ALIGHT, DEST }
 
-/**
- * The plan, navigation, and the live view of one vehicle, in one host.
- *
- * Back inside here never leaves for Home on its own: navigation goes back to the plan,
- * and a plan opened from navigation's own button goes back to navigation. Only the
- * plan's Back, reached the ordinary way, calls [onBack].
- */
 @Composable
 fun TripDetailScreen(
     model: KavModel,
@@ -52,17 +64,11 @@ fun TripDetailScreen(
     onEnd: () -> Unit = {},
     onNavigating: (Boolean) -> Unit = {},
 ) {
-    // a ride opened for tracking, or the whole trip started, takes over the screen
     var tracking by remember { mutableStateOf<Pair<Moovit.Leg, Int>?>(null) }
     var navigating by remember(trip) { mutableStateOf(startInNavigation) }
-    // the plan was opened from navigation's own button, so back returns there
     var planFromNavigation by remember(trip) { mutableStateOf(false) }
-    // The tab bar belongs to the app, not to a trip in progress. The host hides it
-    // while this screen is navigating and gets it back however navigation ends,
-    // including the back gesture and the screen being torn down under it.
     LaunchedEffect(navigating) { onNavigating(navigating) }
     DisposableEffect(Unit) { onDispose { onNavigating(false) } }
-    // One host for both the plan and navigation: an alert row in either opens here.
     var alert by remember { mutableStateOf<Pair<Int, String>?>(null) }
     fun leavePlan() {
         if (planFromNavigation) { planFromNavigation = false; navigating = true } else onBack()
@@ -126,6 +132,9 @@ private fun TripDetailBody(
             BackButton(onBack)
             Spacer(Modifier.width(K.gap3))
             Sig(T("Your", "הנסיעה"), T("trip", "שלכם"), Modifier.weight(1f))
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            ShareButton { shareTrip(ctx, trip, fromLabel, toLabel) }
+            Spacer(Modifier.width(K.gap2))
             StartButton(onStart)
         }
 
@@ -139,8 +148,6 @@ private fun TripDetailBody(
         }
     }
 }
-
-/* summary sheet */
 
 @Composable
 private fun Summary(trip: Moovit.Itinerary, r: Moovit.Resolved) {
@@ -163,7 +170,7 @@ private fun Summary(trip: Moovit.Itinerary, r: Moovit.Resolved) {
         TripStrip(trip, r)
         val chips = ArrayList<String>()
         if (trip.accessible) chips.add(T("Step-free", "נגיש"))
-        if (trip.co2g >= 0) chips.add(co2(trip.co2g))
+        if (Shown.co2 && trip.co2g >= 0) chips.add(co2(trip.co2g))
         trip.tags.forEach { chips.add(it) }
         if (chips.isNotEmpty()) {
             Spacer(Modifier.height(K.gap2))
@@ -180,12 +187,6 @@ private fun Summary(trip: Moovit.Itinerary, r: Moovit.Resolved) {
     }
 }
 
-/**
- * The subtitle under a departure: Moovit's `TimePresentationType.textResId`, word for
- * word from its own strings.xml. A DELAYED or AHEAD_OF_TIME status is not part of that
- * table, so it is appended after, Moovit spells it out in the station schedule row
- * (Time.Status), never by recolouring the time.
- */
 private fun depNote(deps: List<Moovit.Departure>): String? {
     val d = deps.firstOrNull() ?: return null
     val state = when (d.state) {
@@ -210,7 +211,6 @@ private fun depNote(deps: List<Moovit.Departure>): String? {
     return listOfNotNull(state, alert).joinToString(" · ").ifBlank { null }
 }
 
-/** Compact emissions label, using grams below one kilogram. */
 fun co2(g: Int): String = if (g < 1000) T("$g g CO2e", "$g גרם CO2e") else T("%.2f kg CO2e", "%.2f ק\"ג CO2e").format(g / 1000.0)
 
 @Composable
@@ -231,8 +231,6 @@ private fun TripStrip(trip: Moovit.Itinerary, r: Moovit.Resolved) {
     }
 }
 
-/* the timeline */
-
 @Composable
 private fun Timeline(
     trip: Moovit.Itinerary,
@@ -250,8 +248,6 @@ private fun Timeline(
         }
         trip.legs.forEachIndexed { i, l ->
             when (l.kind) {
-                // a street walk followed by a walk inside the station is one walk to a
-                // rider, so only the first of a run gets a row and it carries the total
                 Moovit.LegKind.WALK -> {
                     val prev = trip.legs.getOrNull(i - 1)
                     if (prev?.kind != Moovit.LegKind.WALK) {
@@ -280,6 +276,7 @@ private fun Timeline(
                         StopRowDetail(
                             board?.name ?: T("Board here", "עלייה כאן"), board?.code,
                             hm.format(Date(l.dep * 1000)), legMode(l, r),
+                            platform = r.platform(l, wait),
                         )
                         Spacer(Modifier.height(K.gap2))
                         BoardCard(l, wait, r, onTrack)
@@ -313,17 +310,12 @@ private fun walkLabel(metres: Int, mins: Int): String {
 }
 
 private fun rideLabel(l: Moovit.Leg): String {
-    // stopSequenceIds includes the stop you board at, so the ride is one fewer
     val n = (l.stops.size - 1).coerceAtLeast(0)
     val stops = if (n == 1) T("1 stop", "תחנה 1") else T("$n stops", "$n תחנות")
     return if (n > 0) T("Ride $stops · ${l.minutes} min", "נסיעה $stops · ${l.minutes} דק׳")
         else T("Ride ${l.minutes} min", "נסיעה ${l.minutes} דק׳")
 }
 
-/**
- * One row of the timeline: the rail is drawn behind the row at full height so the
- * segments meet, with the node sitting on it. `thick` marks the on-vehicle stretch.
- */
 @Composable
 private fun Rail(
     node: Node,
@@ -372,15 +364,18 @@ private fun Endpoint(label: String, time: String, when_: String) {
     }
 }
 
-/** The vehicle a ride leg is on, for the station mark beside its two stops. */
 internal fun legMode(ride: Moovit.Leg, r: Moovit.Resolved): Mode =
     modeOf(r.routeType(r.line(ride.lineId)?.agencyId ?: -1))
 
 @Composable
-private fun StopRowDetail(name: String, code: String?, time: String, mode: Mode? = null) {
+private fun StopRowDetail(
+    name: String,
+    code: String?,
+    time: String,
+    mode: Mode? = null,
+    platform: String = "",
+) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        // Moovit puts img_general_station_* beside a station's name; without it a rail
-        // stop was only its text, and "רכבת ראש העין צפון" read like any bus stop.
         if (mode != null) {
             StationMark(mode, 17.dp)
             Spacer(Modifier.width(K.gap2))
@@ -388,13 +383,16 @@ private fun StopRowDetail(name: String, code: String?, time: String, mode: Mode?
         Column(Modifier.weight(1f)) {
             Text(name, fontSize = 15.sp, color = K.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (!code.isNullOrBlank()) Text(T("Stop $code", "תחנה $code"), fontSize = 14.sp, color = K.dim)
+            if (platform.isNotBlank()) {
+                Spacer(Modifier.height(K.gap1))
+                PlatformTag(platform)
+            }
         }
         Spacer(Modifier.width(K.gap2))
         Text(time, fontSize = 14.sp, color = K.text)
     }
 }
 
-/** A plain step on the rail: "Walk 350 m · 4 min", with an optional trailing chip. */
 @Composable
 private fun Step(label: String, trailing: String?) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -407,7 +405,6 @@ private fun Step(label: String, trailing: String?) {
     }
 }
 
-/** Boarding details: line, destination, departures and tracking availability. */
 @Composable
 private fun BoardCard(
     ride: Moovit.Leg,
@@ -420,7 +417,7 @@ private fun BoardCard(
         if (options.size > 1) Text(T("Take one of these lines", "בחרו אחד מהקווים האלה"), fontSize = 14.sp, color = K.dim)
         options.forEachIndexed { index, (option, boarding) ->
             if (index > 0) Box(Modifier.fillMaxWidth().padding(vertical = K.gap2).height(1.dp).background(K.border))
-            BoardOption(option, boarding, r, onTrack)
+            BoardOption(option, boarding, r, onTrack, showPlatform = options.size > 1)
         }
     }
 }
@@ -431,23 +428,25 @@ private fun BoardOption(
     wait: Moovit.Leg?,
     r: Moovit.Resolved,
     onTrack: (Moovit.Leg, Int) -> Unit,
+    showPlatform: Boolean = false,
 ) {
     val info = r.line(ride.lineId)
     val agency = info?.agencyId ?: -1
     val rt = if (info != null) r.routeType(agency) else 3
+    val plate = plateFor(rt, agency)
     val now = System.currentTimeMillis() / 1000
     Column(Modifier.fillMaxWidth().padding(vertical = K.gap2)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Row(
-                Modifier.clip(RoundedCornerShape(10.dp)).background(K.surface2)
+                Modifier.clip(RoundedCornerShape(10.dp)).background(plate?.fill ?: K.surface2)
                     .padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AgencyMark(rt, agency, K.muted, 15.dp)
+                AgencyMark(rt, agency, plate?.ink ?: K.muted, 15.dp)
                 Spacer(Modifier.width(6.dp))
                 Text(
                     ride.shortName.ifBlank { null } ?: info?.number?.ifBlank { null } ?: "#${ride.lineId}",
-                    fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium,
+                    fontSize = 15.sp, color = plate?.ink ?: K.text, fontWeight = FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 120.dp),
                 )
             }
@@ -458,9 +457,15 @@ private fun BoardOption(
                     fontSize = 14.sp, color = K.muted, maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // who actually runs it: Egged, Dan, Metropoline, Israel Railways
                 r.agencyName(agency)?.let {
                     Text(it, fontSize = 12.sp, color = K.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (showPlatform) {
+                val platform = r.platform(ride, wait)
+                if (platform.isNotBlank()) {
+                    Spacer(Modifier.width(K.gap2))
+                    PlatformTag(platform)
                 }
             }
         }
@@ -475,8 +480,6 @@ private fun BoardOption(
             }
         }
         wait?.let { AlertRow(it.alertCategory, it.alertText, r.line(ride.lineId)?.groupId ?: 0) }
-        // The glyph is lit only with a real vehicle position; the button opens either
-        // way, and the live screen says which of the several reasons applies.
         val live = r.arrival(ride)?.hasLocation == true
         Spacer(Modifier.height(K.gap2))
         LiveLocationButton(live) { onTrack(ride, ride.fromStop) }

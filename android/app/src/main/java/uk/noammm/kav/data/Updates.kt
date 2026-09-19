@@ -12,11 +12,6 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
-/**
- * Releases on GitHub are the only channel: no store, no server of Kav's own. The
- * newest release is compared with the running version at every launch, and its APK
- * is fetched and handed to the system installer on request.
- */
 object Updates {
     const val OWNER = "ImNoammm"
     const val REPO = "kav"
@@ -34,7 +29,6 @@ object Updates {
     fun installedVersion(ctx: Context): String =
         runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "0"
 
-    /** GET releases/latest, drafts and pre-releases are not offered. */
     fun latest(): Release {
         val c = (URL("https://api.github.com/repos/$OWNER/$REPO/releases/latest").openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000; readTimeout = 15_000
@@ -61,7 +55,6 @@ object Updates {
         )
     }
 
-    /** Numeric, segment by segment: 1.10 is newer than 1.9, and a missing segment is zero. */
     fun isNewer(remote: String, installed: String): Boolean {
         val a = segments(remote); val b = segments(installed)
         for (i in 0 until maxOf(a.size, b.size)) {
@@ -76,7 +69,6 @@ object Updates {
 
     private fun dir(ctx: Context) = File(ctx.cacheDir, "updates").apply { mkdirs() }
 
-    /** The release's APK, fetched to the cache with progress, reused if already there. */
     fun download(ctx: Context, release: Release, onProgress: (Long, Long) -> Unit): File {
         val url = release.apkUrl ?: throw RuntimeException(T("This release has no APK attached", "לגרסה הזו לא מצורף קובץ APK"))
         val file = File(dir(ctx), "kav-${release.version}.apk")
@@ -89,8 +81,6 @@ object Updates {
         c.instanceFollowRedirects = true
         c.connectTimeout = 15_000; c.readTimeout = 30_000
         c.setRequestProperty("User-Agent", "Kav")
-        // GitHub hands assets off to another host; HttpURLConnection follows only
-        // within one scheme, and objects.githubusercontent.com is https like the API
         var hops = 0
         while (c.responseCode in 300..399 && hops < 5) {
             val next = c.getHeaderField("Location") ?: break
@@ -119,7 +109,6 @@ object Updates {
         return file
     }
 
-    /** Android 8 and later gate sideloading per app; the toggle lives in system settings. */
     fun canInstall(ctx: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.O || ctx.packageManager.canRequestPackageInstalls()
 
@@ -133,7 +122,6 @@ object Updates {
         }
     }
 
-    /** Hand the file to the system installer, which does the asking and the replacing. */
     fun install(ctx: Context, file: File) {
         val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.updates", file)
         ctx.startActivity(

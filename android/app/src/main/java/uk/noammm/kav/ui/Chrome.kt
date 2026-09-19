@@ -22,7 +22,6 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** A shared native sans-serif screen title. */
 @Composable
 fun Sig(plain: String, accent: String, modifier: Modifier = Modifier) {
     Text(
@@ -52,15 +51,26 @@ fun BackButton(onClick: () -> Unit) = PlateButton(T("Back", "חזרה"), onClick
     }
 }
 
-/** The gear, with a dot on its shoulder while a newer release is waiting. */
+@Composable
+fun ShareButton(onClick: () -> Unit) = PlateButton(T("Share trip", "שיתוף נסיעה"), onClick) {
+    Canvas(Modifier.size(20.dp)) {
+        val w = size.width; val h = size.height
+        val a = Offset(w * .72f, h * .20f)
+        val b = Offset(w * .26f, h * .50f)
+        val c = Offset(w * .72f, h * .80f)
+        drawLine(K.muted, b, a, w * .09f, StrokeCap.Round)
+        drawLine(K.muted, b, c, w * .09f, StrokeCap.Round)
+        drawCircle(K.muted, w * .13f, a)
+        drawCircle(K.muted, w * .13f, b)
+        drawCircle(K.muted, w * .13f, c)
+    }
+}
+
 @Composable
 fun SettingsButton(badge: Boolean = false, onClick: () -> Unit) = PlateButton(T("Settings", "הגדרות"), onClick) {
     Canvas(Modifier.size(20.dp)) {
         val w = size.width
         val c = Offset(w * .5f, w * .5f)
-        // Two bare rings read as a target, not a gear, and the Live tab already wears
-        // exactly that. The teeth go down first so the rim covers their inner ends and
-        // they read as part of the body rather than spokes laid across it.
         repeat(8) { i ->
             val a = i * PI.toFloat() / 4f
             val dx = cos(a); val dy = sin(a)
@@ -80,7 +90,6 @@ fun SettingsButton(badge: Boolean = false, onClick: () -> Unit) = PlateButton(T(
     }
 }
 
-/** A shared glass control; `lit` marks its selected state. */
 @Composable
 fun Chip(text: String, lit: Boolean, onClick: () -> Unit) {
     Box(
@@ -97,7 +106,6 @@ fun Chip(text: String, lit: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Shared secondary text for empty states and service notes. */
 @Composable
 fun Note(text: String, modifier: Modifier = Modifier, color: Color = K.dim) {
     Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = color, modifier = modifier)

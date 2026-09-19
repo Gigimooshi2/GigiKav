@@ -65,11 +65,39 @@ for r in csv.DictReader(openf("stops.txt")):
     stops.append((r["stop_name"].strip(), lat, lon, int(r["stop_code"] or 0), city_idx[city]))
 print(f"stops in bbox: {len(stops):,}   cities: {len(cities):,}")
 
+# Operators, for the sections the lines browser draws under each mode chip. The
+# feed's agency_id is dense and small; the bundle stores an index into this name
+# table per route, which costs one varint each.
+agency_idx, agencies = {}, []
+for r in csv.DictReader(openf("agency.txt")):
+    agency_idx[r["agency_id"]] = len(agencies)
+    agencies.append(r["agency_name"].strip())
+print(f"agencies: {len(agencies):,}")
+
+# The feed gives the Carmelit and the Rakavlit the same type 5, though one is an
+# underground funicular and the other hangs from a wire over the Technion. Moovit's
+# own agency record separates them online; offline the split is made here, where the
+# agency is still in hand: agency 20 is the Carmelit, and 7 is MVRouteType's
+# funicular, which is what it is. The Rakavlit keeps 5, the cable car it actually is.
+#
+# Shuttles get the same treatment. The MOT feed has no shuttle type - Moovit's own
+# shuttle category (the Israel Railways replacement runs, Nativ La'Asakim) is
+# curated data that never reaches this feed at all - but the park-and-ride shuttle
+# lines it does carry arrive as ordinary buses whose stops are named for what they
+# are. 711 is the extended-GTFS "Shuttle Bus", so they leave here wearing it.
+CARMELIT_AGENCY = "20"
+SHUTTLE = "שאטל"
+
 route_idx, routes = {}, []
 for r in csv.DictReader(openf("routes.txt")):
+    rtype = int(r["route_type"])
+    if rtype == 5 and r["agency_id"] == CARMELIT_AGENCY:
+        rtype = 7
+    if rtype == 3 and (SHUTTLE in r["route_long_name"] or SHUTTLE in r["route_short_name"]):
+        rtype = 711
     route_idx[r["route_id"]] = len(routes)
-    routes.append((r["route_short_name"].strip(), r["route_long_name"].strip(),
-                   int(r["route_type"])))
+    routes.append((r["route_short_name"].strip(), r["route_long_name"].strip(), rtype,
+                   agency_idx.get(r["agency_id"], -1)))
 
 trip_route = {}
 for r in csv.DictReader(openf("trips.txt")):
@@ -105,8 +133,11 @@ n_conn = sum(len(t[1]) - 1 for t in kept)
 print(f"trips kept: {len(kept):,}   connections: {n_conn:,}")
 
 # encode
-buf = bytearray(b"KAV3")
+buf = bytearray(b"KAV4")
 vint(buf, len(stops)); vint(buf, len(routes)); vint(buf, len(kept)); vint(buf, len(cities))
+vint(buf, len(agencies))
+for a in agencies:
+    vstr(buf, a)
 
 for c in cities:
     vstr(buf, c)
@@ -117,8 +148,8 @@ for name, la, lo, code, ci in stops:
     vint(buf, ila - plat); vint(buf, ilo - plon); plat, plon = ila, ilo
     vint(buf, code); vint(buf, ci); vstr(buf, name)
 
-for short, long, rtype in routes:
-    vstr(buf, short); vstr(buf, long); vint(buf, rtype)
+for short, long, rtype, agency in routes:
+    vstr(buf, short); vstr(buf, long); vint(buf, rtype); vint(buf, agency)
 
 for ridx, sq in kept:
     vint(buf, ridx); vint(buf, len(sq)); vint(buf, sq[0][0])

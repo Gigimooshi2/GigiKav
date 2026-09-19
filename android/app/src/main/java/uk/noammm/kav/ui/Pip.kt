@@ -14,10 +14,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uk.noammm.kav.KavModel
 
-/**
- * The small window: the step the rider is on, and nothing else. It reads the same
- * journey state as the full screen, so it moves on when the journey does.
- */
 @Composable
 fun PipOverlay(model: KavModel) {
     val journey = model.activeJourney

@@ -26,7 +26,6 @@ private val glassStyle = HazeStyle(
     fallbackTint = HazeTint(K.surface1.copy(alpha = .92f)),
 )
 
-/** One material for controls and floating panels, with a bounded backdrop blur. */
 @Composable
 fun Modifier.glassSurface(radius: Dp = 22.dp): Modifier {
     val shape = RoundedCornerShape(radius)

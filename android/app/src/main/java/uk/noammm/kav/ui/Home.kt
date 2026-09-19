@@ -35,12 +35,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** A destination first, then the steps of a journey the user started. */
 @Composable
 internal fun HomeScreen(
     model: KavModel,
     recentTrips: List<RecentTrip>,
-    /** Where the trip starts, worded exactly as the results header words it. */
     onSearch: () -> Unit,
     onFavourite: (Moovit.Place) -> Unit,
     onSetFavourite: (Favourite) -> Unit,
@@ -61,8 +59,6 @@ internal fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(K.gap4),
         ) {
             item {
-                // The one question Home asks. Where the trip starts, and swapping the
-                // two ends, belong to the results header, which shows both of them.
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 64.dp).glassSurface(24.dp)
                         .clickable(role = Role.Button, onClickLabel = T("Search destination", "חיפוש יעד"), onClick = onSearch)
@@ -79,16 +75,12 @@ internal fun HomeScreen(
                 }
             }
             item {
-                // The rider's own places, one tap from the front door. A place already
-                // set goes straight to its route; one not set yet opens the search.
                 FavouriteStrip(
                     favourites,
                     onPick = { f -> f.place?.let { onFavourite(it) } ?: onSetFavourite(f) },
                     onAdd = { creating = true },
                     onEdit = { editing = it },
                     horizontalPadding = 0.dp,
-                    // this is the strip whose order the rider sees every launch, so
-                    // this is where sorting and removing live
                     onReorder = { save(it) },
                     onRemove = { f -> save(favourites.filter { it.id != f.id }) },
                 )
@@ -166,7 +158,6 @@ internal fun HomeScreen(
             val fresh = Favourite("f${System.currentTimeMillis()}", name, icon, null)
             save(favourites + fresh)
             creating = false
-            // named here, placed next, the same two steps the search strip takes
             onSetFavourite(fresh)
         },
         onRemove = null,
@@ -181,14 +172,11 @@ internal fun HomeScreen(
             },
             onRemove = if (f.id == Favourite.HOME) null else { { save(favourites.filter { it.id != f.id }); editing = null } },
             onDismiss = { editing = null },
-            // the same two steps a new favourite takes, minus the naming: close the
-            // editor, then ask the search where this one is now
             onChangePlace = { editing = null; onSetFavourite(f) },
         )
     }
 }
 
-/** When a trip was taken: the clock today, the day once it is older than that. */
 private fun tripWhen(at: Long): String {
     val now = java.util.Calendar.getInstance()
     val then = java.util.Calendar.getInstance().apply { timeInMillis = at }
@@ -200,11 +188,6 @@ private fun tripWhen(at: Long): String {
     return SimpleDateFormat("d MMM", T.locale).format(Date(at))
 }
 
-/**
- * The journey under way, as the same cards navigation shows, one per step, to swipe
- * through. The card in front is the step the journey is on; it moves on by itself as
- * the journey does, and Resume opens navigation right there.
- */
 @Composable
 private fun JourneyCard(model: KavModel, journey: ActiveJourney, onResume: () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
@@ -237,9 +220,6 @@ private fun JourneyCard(model: KavModel, journey: ActiveJourney, onResume: () ->
                     .padding(horizontal = K.gap3, vertical = K.gap2),
             )
         }
-        // Each card is as tall as its own step, not as tall as the tallest one, and a
-        // change of height, the pager moving on, a stop list filling in, slides
-        // rather than cuts.
         val ceiling = with(LocalDensity.current) { 230.dp.roundToPx() }
         val pageHeights = remember(steps) { mutableStateMapOf<Int, Int>() }
         HorizontalPager(
@@ -270,7 +250,6 @@ private fun JourneyCard(model: KavModel, journey: ActiveJourney, onResume: () ->
     }
 }
 
-/** One line of guidance for a step, for the small window and anything else that has room for one line. */
 internal fun stepInstruction(step: Step, journey: ActiveJourney, lastLeg: Boolean, now: Long): Pair<String, String> {
     val r = journey.resolved
     fun time(utc: Long) = SimpleDateFormat("HH:mm", Locale.US).format(Date(utc * 1000))

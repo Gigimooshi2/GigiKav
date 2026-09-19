@@ -40,29 +40,6 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 
-/**
- * When to plan for.
- *
- * The rows are Moovit's own TimeQuickAction, in its order: DEPART_NOW, DEPART_AT,
- * ARRIVE_BY, TAKE_LAST_LINE, then its LATER shortcut. Only two of them open a
- * picker. TripPlanOptionsFragment (defpackage/rof.java) dispatches the tap:
- *
- *     if (i9 != 2) { if (i9 != 3) { if (i9 != 4) { ... } else {
- *         rofVar2.R1(new TripPlannerTime(TripPlannerTime.Type.LAST, -1L), 0L);
- *     } } else { rofVar2.S1(TripPlannerTime.Type.ARRIVE); }
- *     } else { rofVar2.S1(TripPlannerTime.Type.DEPART); }
- *
- * S1 opens the hour:minute dialog; R1 applies an option there and then. So
- * "Latest departure" asks for no time at all, it is a search mode ("search by
- * times for the last line", voice_over_tripplan_time_choose_last_hint), and the
- * time it carries is a placeholder. vpf.c confirms what goes on the wire for it:
- * `new MVTripPlanRequest(pref, tripPlanTime.b(), b(type), tripPlanTime.d(), ...)`
- * with TripPlanTime.b() falling back to now and d() false once the type is LAST,
- * which is what Moovit.tripPlanRequest already sends for TIME_LAST with no time.
- *
- * Moovit's promo row and its Moovit+ upsell are deliberately absent.
- * Its `reset_button` is here, as "Leave now".
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WhenSheet(
@@ -72,7 +49,6 @@ fun WhenSheet(
     onNow: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    // null = the list of plans; otherwise the MVTimeType being given a time
     var mode by remember { mutableStateOf<Int?>(null) }
     var day by remember { mutableIntStateOf(0) }
     val start = remember(departAt) {
@@ -111,10 +87,7 @@ fun WhenSheet(
         if (chosen == null) {
             WhenRow(T("Set departure time", "קביעת שעת יציאה")) { mode = Moovit.TIME_DEPARTURE }
             WhenRow(T("Set desired arrival time", "קביעת שעת הגעה רצויה")) { mode = Moovit.TIME_ARRIVAL }
-            // no picker: R1, not S1, the mode is the whole answer
             WhenRow(T("Latest departure", "היציאה האחרונה")) { onPick(0L, Moovit.TIME_LAST) }
-            // nothing to reset while the plan is already "now": no row, and no rule
-            // under the one above it either
             val resettable = departAt > 0L || timeType == Moovit.TIME_LAST
             WhenRow(T("+15 min", "+15 דק'"), last = !resettable) {
                 onPick(System.currentTimeMillis() + 15 * 60_000L, Moovit.TIME_DEPARTURE)
@@ -123,7 +96,6 @@ fun WhenSheet(
         } else {
             TimeInput(picker)
             Spacer(Modifier.height(K.gap2))
-            // Moovit's day bar: the date never leaves the picker, it steps beside it
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(K.rControl)).background(K.plate),
                 verticalAlignment = Alignment.CenterVertically,
@@ -158,7 +130,6 @@ fun WhenSheet(
     }
 }
 
-/** The panel Kav puts a sheet in: a scrim that dismisses, and a card that slides up. */
 @Composable
 private fun Scrim(onDismiss: () -> Unit, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     var shown by remember { mutableStateOf(false) }
@@ -189,15 +160,7 @@ private fun Scrim(onDismiss: () -> Unit, content: @Composable androidx.compose.f
             ),
         ) {
             Column(
-                // consume the tap so the panel itself does not dismiss
                 Modifier.fillMaxWidth()
-                    // The card sits on the bottom edge, and two things live there:
-                    // the floating tab bar the pages deliberately draw behind, and
-                    // the keyboard, which arrives on top of everything. Without this
-                    // the last rows and the Done button end up under one or the
-                    // other. Lift clear of whichever is taller, the keyboard when it
-                    // is up, the tab bar (gesture inset included) when it is not,
-                    // and let what is left scroll, so nothing can be out of reach.
                     .padding(bottom = maxOf(bottomCover(), LocalBottomBarInset.current))
                     .padding(K.gap3)
                     .clip(RoundedCornerShape(K.rCard)).background(K.surface1)
@@ -236,7 +199,6 @@ private fun Step(glyph: String, enabled: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Today, tomorrow, then the weekday, the same ladder Moovit's day picker walks. */
 private fun dayLabel(start: Calendar, offset: Int): String {
     val c = (start.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, offset) }
     val today = Calendar.getInstance()
@@ -248,23 +210,6 @@ private fun dayLabel(start: Calendar, offset: Int): String {
     return SimpleDateFormat("EEE d MMM", T.locale).format(Date(c.timeInMillis))
 }
 
-/**
- * A time already gone is not a plan.
- *
- * Moovit never lets one through either: TripPlanOptionsFragment opens its picker
- * with `bundle.putLong("minTime", System.currentTimeMillis())`, and its Earlier
- * button clamps through N1,
- *
- *     long max = Math.max(now, Math.min(maxTime, requested));
- *     if (DEPART.equals(type) && now == max) return TripPlannerTime.g();
- *
- * where g() is `new TripPlannerTime(Type.DEPART, -1L)`: no time, depart now.
- * Kav collapses an arrival in the past the same way rather than asking the server
- * to get somewhere before it was asked, a deliberate widening of Moovit's rule,
- * and the behaviour the app was asked for.
- *
- * Returns 0L as the time, which is Kav's own "depart now" everywhere else.
- */
 internal fun clampDepart(pickedMs: Long, timeType: Int, now: Long): Pair<Long, Int> =
     if (pickedMs <= now) 0L to Moovit.TIME_DEPARTURE else pickedMs to timeType
 

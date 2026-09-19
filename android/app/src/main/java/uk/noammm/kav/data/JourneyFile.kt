@@ -6,35 +6,11 @@ import org.json.JSONObject
 import uk.noammm.kav.ActiveJourney
 import java.io.File
 
-/**
- * The trip being navigated, kept on disk so it survives the process.
- *
- * Android ends Kav whenever it pleases once it is in the background, and a rider
- * who reopens it mid-trip wants their trip back, not the search box. What is kept
- * is the plan itself and the names and geometry already resolved for it, so the
- * card comes back whole with no signal at all. What is not kept is the live
- * layer: it is stale the moment it is written, and the same loop that always
- * refreshed it refreshes it again.
- *
- * A file this Kav cannot read — corrupt, or written by a different Kav — is a
- * fresh start, never a crash.
- */
 object JourneyFile {
     private const val NAME = "journey.json"
 
-    /**
-     * How long past its planned arrival a trip is still offered back. Trips run
-     * late, they do not run into tomorrow: reopening the app the next morning
-     * should not lead with yesterday's ride home.
-     */
     private const val KEEP_S = 3 * 3600L
 
-    /**
-     * The last content written, as a cheap fingerprint: the trip's identity, the
-     * rider's choices, the step, and how much of the name and geometry tables has
-     * arrived. Everything in it moves only when the file should, so the live
-     * refresh rewriting the journey every poll costs no writes at all.
-     */
     @Volatile private var lastKey: Int? = null
 
     private fun key(journey: ActiveJourney, step: Int): Int = listOf(
@@ -46,7 +22,6 @@ object JourneyFile {
 
     private fun file(ctx: Context) = File(ctx.filesDir, NAME)
 
-    /** What was being navigated when the process last ran, and the step it was at. */
     fun load(ctx: Context): Pair<ActiveJourney, Int>? {
         val f = file(ctx)
         val o = try { JSONObject(f.readText()) } catch (e: Exception) { return null }
@@ -58,7 +33,6 @@ object JourneyFile {
         return out
     }
 
-    /** Writes only when something kept actually changed; the live layer never counts. */
     fun save(ctx: Context, journey: ActiveJourney, step: Int) {
         val k = key(journey, step)
         if (k == lastKey) return
@@ -74,13 +48,12 @@ object JourneyFile {
         }
     }
 
-    /** The trip was ended on purpose: nothing to come back to. */
     fun clear(ctx: Context) {
         file(ctx).delete()
         lastKey = null
     }
 
-    /* The codec. Plain values in, plain values out, so a test can hold it whole. */
+    fun mtime(ctx: Context): Long = file(ctx).lastModified()
 
     internal fun json(journey: ActiveJourney, step: Int): JSONObject = JSONObject()
         .put("step", step)
@@ -171,6 +144,7 @@ object JourneyFile {
         .put("status", d.status).put("cert", d.certainty).put("traffic", d.traffic)
         .put("freq", d.frequency).put("dropped", d.rtDropped)
         .put("veh", d.vehicleStatus).put("alert", d.alert)
+        .put("platform", d.platform)
 
     private fun departure(o: JSONObject) = Moovit.Departure(
         tripId = o.optLong("trip"), staticUtc = o.optLong("static"),
@@ -178,7 +152,7 @@ object JourneyFile {
         status = o.optInt("status"), certainty = o.optInt("cert"),
         traffic = o.optInt("traffic"), frequency = o.optBoolean("freq"),
         rtDropped = o.optBoolean("dropped"), vehicleStatus = o.optInt("veh"),
-        alert = o.optInt("alert"),
+        alert = o.optInt("alert"), platform = o.optString("platform"),
     )
 
     private fun json(l: Moovit.LineInfo): JSONObject = JSONObject()
@@ -190,7 +164,6 @@ object JourneyFile {
         o.optString("origin"), o.optString("dest"), o.optString("caption"),
     )
 
-    /** A stop with no known position writes none: JSON has no NaN to give back. */
     private fun json(s: Moovit.StopInfo): JSONObject {
         val o = JSONObject().put("id", s.id).put("name", s.name).put("code", s.code)
         if (s.lat.isFinite() && s.lon.isFinite()) o.put("lat", s.lat).put("lon", s.lon)
@@ -202,7 +175,6 @@ object JourneyFile {
         o.optDouble("lat", Double.NaN), o.optDouble("lon", Double.NaN),
     )
 
-    /** Paths are written flat, lat lon lat lon: half the brackets of a pair each. */
     private fun coords(path: List<Pair<Double, Double>>): JSONArray =
         JSONArray().apply { path.forEach { (lat, lon) -> put(lat); put(lon) } }
 

@@ -5,22 +5,8 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 
-/**
- * Moovit's stop database, kept on the phone.
- *
- * The Live tab needs the Moovit ids of the stops around you, and the only keyless way
- * to those is paging the metro's stop entities a hundred at a time, in id order. The
- * first pages are the lowest ids, which are nowhere in particular: forty stops "near"
- * Rosh HaAyin taken from the first four thousand ids were spread from Herzliya to
- * Elad. So the whole database is paged once, in the background, tightening the map
- * as it goes, and written here so the next launch starts complete.
- *
- * The file is the app's own: id, coordinates and name per stop, about a megabyte for
- * the country. A partial file is kept too, with the id paging stopped at, so a page
- * walk cut short by leaving the tab carries on from where it was.
- */
 object StopStore {
-    private const val MAGIC = 1263620145   // "KST1" as big-endian ASCII
+    private const val MAGIC = 1263620145
 
     class Saved(val stops: List<Moovit.Stop>, val nextId: Int, val complete: Boolean)
 

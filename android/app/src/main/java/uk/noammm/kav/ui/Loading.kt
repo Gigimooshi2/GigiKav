@@ -27,13 +27,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 
-/**
- * A vehicle running along a short line of stops, lighting each one as it passes.
- * The same mark stands in wherever the app is waiting on something, routes, the
- * timetable, a search, so a wait looks like the app rather than like a spinner.
- * Sized to be seen from across the screen: it stands in the middle of whatever is
- * waiting, and a small mark in a corner read as a caption rather than a state.
- */
 @Composable
 fun LoadingPulse(label: String, modifier: Modifier = Modifier, wide: Boolean = true) {
     val t = rememberInfiniteTransition(label = "loading")
@@ -70,12 +63,6 @@ fun LoadingPulse(label: String, modifier: Modifier = Modifier, wide: Boolean = t
     }
 }
 
-/**
- * A wait with a known end: the track, and how much of it is behind us. Where
- * [LoadingPulse] says "still going", this says how far, so a long wait reads as
- * progress rather than as a hang. Animated between readings, because the thing
- * being counted arrives in blocks and a bar that jumps looks broken.
- */
 @Composable
 fun ProgressBar(fraction: Float, modifier: Modifier = Modifier) {
     val shown by animateFloatAsState(
@@ -86,7 +73,6 @@ fun ProgressBar(fraction: Float, modifier: Modifier = Modifier) {
     }
 }
 
-/** The rest of a page, waiting: the mark in the middle of whatever space is left. */
 @Composable
 fun LoadingBlock(label: String, modifier: Modifier = Modifier) {
     Box(
@@ -95,7 +81,6 @@ fun LoadingBlock(label: String, modifier: Modifier = Modifier) {
     ) { LoadingPulse(label) }
 }
 
-/** The whole screen, waiting: for a route that will open on its own. */
 @Composable
 fun LoadingScreen(label: String, onBack: (() -> Unit)? = null) {
     androidx.activity.compose.BackHandler(enabled = onBack != null) { onBack?.invoke() }

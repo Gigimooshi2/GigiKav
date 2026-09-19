@@ -12,13 +12,10 @@ class WhenSheetRegressionTest {
 
     @Test
     fun testATimeAlreadyGoneBecomesDepartNow() {
-        // an hour ago, asked for as a departure
         assertEquals(
             0L to Moovit.TIME_DEPARTURE,
             clampDepart(now - 3_600_000L, Moovit.TIME_DEPARTURE, now),
         )
-        // and as an arrival: Kav collapses both, rather than asking the server to
-        // get somewhere before it was asked
         assertEquals(
             0L to Moovit.TIME_DEPARTURE,
             clampDepart(now - 60_000L, Moovit.TIME_ARRIVAL, now),

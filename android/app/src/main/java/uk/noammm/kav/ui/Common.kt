@@ -32,19 +32,14 @@ import uk.noammm.kav.data.Net
 import java.util.Calendar
 import kotlin.math.*
 
-/** Space occupied by the floating tabs; inset content, leaving page backgrounds full height. */
 val LocalBottomBarInset = staticCompositionLocalOf { 0.dp }
 
-/** How much of the bottom edge the system is covering right now. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun bottomCover(): androidx.compose.ui.unit.Dp =
     WindowInsets.ime.union(WindowInsets.navigationBars).asPaddingValues().calculateBottomPadding()
 
-/** Opens the service alert behind an AlertRow: (line group id, the row's own label). */
 val LocalServiceAlertOpener = staticCompositionLocalOf<(Int, String) -> Unit> { { _, _ -> } }
-
-/* time */
 
 fun hhmm(s: Int): String = "%02d:%02d".format((s / 3600) % 24, (s / 60) % 60)
 
@@ -60,15 +55,12 @@ fun nowSec(): Int {
     return c.get(Calendar.HOUR_OF_DAY) * 3600 + c.get(Calendar.MINUTE) * 60 + c.get(Calendar.SECOND)
 }
 
-/** "4 min" while it is close enough to matter, otherwise null. */
 fun relative(t: Int, from: Int = nowSec()): String? {
     val d = t - from
     if (d < 0 || d > 3600) return null
     val m = (d / 60.0).roundToInt()
     return if (m <= 0) T("now", "עכשיו") else T("$m min", "$m דק'")
 }
-
-/* geo */
 
 private const val EARTH = 6371000.0
 
@@ -83,33 +75,13 @@ fun distanceLabel(m: Double): String =
     if (m < 1000) T("${m.roundToInt()} m", "${m.roundToInt()} מ'")
     else T("%.1f km", "%.1f ק\"מ").format(m / 1000)
 
-/* modes */
-
-/**
- * One case per vehicle Moovit names. `TransitType.VehicleType` is TRAM, SUBWAY, TRAIN,
- * BUS, FERRY, CABLE, GONDOLA, FUNICULAR, and `MVRouteType` numbers them in that same
- * order, so the wire value and the vehicle are the same fact, and the four that Kav
- * used to fold into TRAM (cable, gondola, funicular, monorail) each get their own mark.
- */
 enum class Mode { TRAM, SUBWAY, TRAIN, BUS, FERRY, CABLE, GONDOLA, FUNICULAR, TAXI, OTHER }
 
-/**
- * MVRouteType, value for value: Tram 0, Subway 1, Rail 2, Bus 3, Ferry 4, Cable 5,
- * Gondola 6, Funicular 7. The rest are the extended GTFS types the Israeli MOT feed
- * actually ships, 8 is the share-taxi network (מוניות שירות) and 715 the
- * demand-responsive shuttles, and 8 used to fall through to OTHER and draw a bare
- * circle. Trolleybuses ride as buses and a monorail as a tram, as Moovit has neither.
- *
- * Note what this cannot resolve on its own: the MOT feed gives the Carmelit and the
- * Rakavlit the same type 5, though one is a funicular and the other an aerial cable
- * car. Online, [Moovit.Resolved.routeType] answers from the metro's own agency record
- * and separates them; offline both take the cable car.
- */
 fun modeOf(type: Int): Mode = when (type) {
     0 -> Mode.TRAM
     1 -> Mode.SUBWAY
     2 -> Mode.TRAIN
-    3, 11 -> Mode.BUS
+    3, 11, 711 -> Mode.BUS
     4 -> Mode.FERRY
     5 -> Mode.CABLE
     6 -> Mode.GONDOLA
@@ -117,6 +89,32 @@ fun modeOf(type: Int): Mode = when (type) {
     8, 715 -> Mode.TAXI
     12 -> Mode.TRAM
     else -> Mode.OTHER
+}
+
+fun isRail(routeType: Int, agencyId: Int) = routeType == 2 || agencyId == 854820
+
+data class ModePlate(val fill: Color, val edge: Color, val ink: Color)
+
+private val TramPlate = ModePlate(Color(0xFFD8232A), Color(0xFFA81A20), Color(0xFFFCF4F4))
+private val RailPlate = ModePlate(Color(0xFF1F6FD0), Color(0xFF1854A3), Color(0xFFF3F7FC))
+private val TaxiPlate = ModePlate(Color(0xFFF5C518), Color(0xFFC79D0E), Color(0xFF16160F))
+private val CarmelitPlate = ModePlate(Color(0xFF0A822E), Color(0xFF086423), Color(0xFFF2FBF4))
+private val RakavlitPlate = ModePlate(Color(0xFF8950D4), Color(0xFF693EA3), Color(0xFFF7F4FD))
+
+fun plateFor(routeType: Int, agencyId: Int = -1): ModePlate? = when {
+    isRail(routeType, agencyId) -> RailPlate
+    modeOf(routeType) == Mode.TRAM -> TramPlate
+    modeOf(routeType) == Mode.TAXI -> TaxiPlate
+    modeOf(routeType) == Mode.FUNICULAR -> CarmelitPlate
+    modeOf(routeType) == Mode.CABLE || modeOf(routeType) == Mode.GONDOLA -> RakavlitPlate
+    else -> null
+}
+
+fun typeName(routeType: Int): String = when (routeType) {
+    711 -> T("Shuttle", "שאטל")
+    7 -> T("Carmelit", "כרמלית")
+    5, 6 -> T("Rakavlit", "רכבלית")
+    else -> modeName(modeOf(routeType))
 }
 
 fun modeName(m: Mode): String = when (m) {
@@ -134,43 +132,34 @@ fun WalkGlyph(tint: Color = K.dim, size: androidx.compose.ui.unit.Dp = 13.dp) {
         fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
             drawLine(tint, Offset(x1 * w, y1 * h), Offset(x2 * w, y2 * h), sw, StrokeCap.Round)
         drawCircle(tint, radius = w * .12f, center = Offset(w * .52f, h * .14f))
-        line(.52f, .28f, .48f, .56f)          // torso
-        line(.48f, .56f, .34f, .88f)          // back leg
-        line(.48f, .56f, .66f, .84f)          // front leg
-        line(.52f, .36f, .72f, .46f)          // arm
+        line(.52f, .28f, .48f, .56f)
+        line(.48f, .56f, .34f, .88f)
+        line(.48f, .56f, .66f, .84f)
+        line(.52f, .36f, .72f, .46f)
     }
 }
 
-/* line badge */
-
 @Composable
 fun LineBadge(net: Net, route: Int, modifier: Modifier = Modifier) {
-    val mode = modeOf(net.rType.getOrElse(route) { 3 })
+    val rType = net.rType.getOrElse(route) { 3 }
+    val plate = plateFor(rType)
     Row(
         modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(K.plate)
-            .border(1.dp, K.border, RoundedCornerShape(6.dp))
+            .background(plate?.fill ?: K.plate)
+            .border(1.dp, plate?.edge ?: K.border, RoundedCornerShape(6.dp))
             .padding(horizontal = 7.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        ModeGlyph(mode, K.dim, 12.dp)
+        ModeGlyph(modeOf(rType), plate?.ink ?: K.dim, 12.dp)
         Text(
             net.rShort.getOrElse(route) { "·" }.ifBlank { "·" },
-            fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = K.text,
+            fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = plate?.ink ?: K.text,
         )
     }
 }
 
-/* agency marks */
-
-/**
- * Israel Railways' mark: a light plate carrying three stepped bands. Moovit prints
- * the agency's real logo here, in colour; this is the same geometry drawn in the
- * app's own palette, so a train badge cannot be mistaken for a bus badge at a
- * glance, which is the whole job the logo does on the card.
- */
 @Composable
 fun RailMark(size: androidx.compose.ui.unit.Dp = 15.dp) {
     Canvas(Modifier.size(size)) {
@@ -181,7 +170,6 @@ fun RailMark(size: androidx.compose.ui.unit.Dp = 15.dp) {
             size = androidx.compose.ui.geometry.Size(w, h * .88f),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * .12f),
         )
-        // three parallel bands, each rising left-to-right with a step in the middle
         val band = w * .135f
         for (i in 0..2) {
             val y = h * (.70f - i * .19f)
@@ -198,22 +186,91 @@ fun RailMark(size: androidx.compose.ui.unit.Dp = 15.dp) {
     }
 }
 
-/**
- * The mark that goes on a line badge. Rail gets the railway plate; everything else
- * gets its mode glyph. [agencyId] 854820 is Israel Railways in metro 1.
- */
 @Composable
-fun AgencyMark(routeType: Int, agencyId: Int, tint: Color = K.muted, size: androidx.compose.ui.unit.Dp = 15.dp) {
-    if (routeType == 2 || agencyId == 854820) RailMark(size)
-    else ModeGlyph(modeOf(routeType), tint, size)
+fun CarmelitMark(size: androidx.compose.ui.unit.Dp = 15.dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width; val h = this.size.height
+        drawRoundRect(
+            Color(0xFFEF8E1F),
+            topLeft = Offset(0f, h * .06f),
+            size = androidx.compose.ui.geometry.Size(w, h * .88f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * .12f),
+        )
+        val sw = w * .11f
+        for (i in 0 until 2) {
+            val dx = w * .17f * i
+            val path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(dx + w * .14f, h * .33f)
+                lineTo(dx + w * .48f, h * .33f)
+                lineTo(dx + w * .14f, h * .67f)
+                lineTo(dx + w * .48f, h * .67f)
+            }
+            drawPath(
+                path, Color.White,
+                style = Stroke(sw, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round),
+            )
+        }
+    }
 }
 
-/* the offline timetable, on demand */
+@Composable
+fun RakavlitMark(size: androidx.compose.ui.unit.Dp = 15.dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width; val h = this.size.height
+        drawCircle(Color.White, radius = w * .48f, center = Offset(w / 2, h / 2))
+        val blades = listOf(Color(0xFF2C6BB3), Color(0xFF8AB6E0), Color(0xFF9BA1A8))
+        for (i in 0 until 6) {
+            drawArc(
+                blades[i % 3],
+                startAngle = 60f * i + 8f,
+                sweepAngle = 40f,
+                useCenter = true,
+                topLeft = Offset(w * .06f, h * .06f),
+                size = androidx.compose.ui.geometry.Size(w * .88f, h * .88f),
+            )
+        }
+        drawCircle(Color.White, radius = w * .16f, center = Offset(w / 2, h / 2))
+    }
+}
 
-/**
- * Runs [content] with the timetable loaded by the shell. Keeping the load outside
- * these browser screens lets it finish when a tab leaves the composition.
- */
+@Composable
+fun ShuttleMark(size: androidx.compose.ui.unit.Dp = 15.dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width; val h = this.size.height
+        val plate = Color(0xFF565B63)
+        drawRoundRect(
+            plate,
+            topLeft = Offset(0f, h * .06f),
+            size = androidx.compose.ui.geometry.Size(w, h * .88f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * .12f),
+        )
+        drawRoundRect(
+            Color.White,
+            topLeft = Offset(w * .14f, h * .28f),
+            size = androidx.compose.ui.geometry.Size(w * .72f, h * .36f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * .09f),
+        )
+        drawRect(
+            plate,
+            topLeft = Offset(w * .22f, h * .36f),
+            size = androidx.compose.ui.geometry.Size(w * .56f, h * .12f),
+        )
+        drawCircle(Color.White, radius = w * .075f, center = Offset(w * .32f, h * .72f))
+        drawCircle(Color.White, radius = w * .075f, center = Offset(w * .68f, h * .72f))
+    }
+}
+
+@Composable
+fun AgencyMark(routeType: Int, agencyId: Int, tint: Color = K.muted, size: androidx.compose.ui.unit.Dp = 15.dp) {
+    when {
+        routeType == 711 -> ShuttleMark(size)
+        isRail(routeType, agencyId) -> RailMark(size)
+        modeOf(routeType) == Mode.FUNICULAR -> CarmelitMark(size)
+        modeOf(routeType) == Mode.CABLE || modeOf(routeType) == Mode.GONDOLA -> RakavlitMark(size)
+        else -> ModeGlyph(modeOf(routeType), tint, size)
+    }
+}
+
 @Composable
 fun WithTimetable(model: uk.noammm.kav.KavModel, content: @Composable (Net) -> Unit) {
     val net = model.net
@@ -231,21 +288,11 @@ fun WithTimetable(model: uk.noammm.kav.KavModel, content: @Composable (Net) -> U
     }
 }
 
-/* precise location */
-
-/**
- * Android will not re-prompt once someone has picked "Approximate", so an app stuck on
- * a coarse grant can only point at Settings. Moovit does exactly this, and the wording
- * here is its own (`location_not_accurate_title` / `_message1` / `_button`).
- *
- * It matters more than it sounds: a coarse fix is fuzzed by a kilometre or more, which
- * is enough to plan your trip from the next town.
- */
 @Composable
 fun PreciseLocationNudge() {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     if (uk.noammm.kav.hasPreciseLocation(ctx)) return
-    if (!uk.noammm.kav.hasLocationPermission(ctx)) return   // the normal prompt covers this
+    if (!uk.noammm.kav.hasLocationPermission(ctx)) return
     Row(
         Modifier.padding(horizontal = K.gap3, vertical = K.gap2).fillMaxWidth()
             .clip(RoundedCornerShape(12.dp)).background(K.plate)
@@ -285,9 +332,6 @@ fun PreciseLocationNudge() {
     }
 }
 
-/* service alerts */
-
-/** The amber ⓘ Moovit stamps on the corner of a line badge that has an alert. */
 @Composable
 fun AlertPip(category: Int, size: androidx.compose.ui.unit.Dp = 13.dp) {
     if (category < 3) return
@@ -304,11 +348,6 @@ fun AlertPip(category: Int, size: androidx.compose.ui.unit.Dp = 13.dp) {
     }
 }
 
-/**
- * Moovit's alert row: an amber-outlined strip under the line, carrying the server's own
- * word for what is wrong, "Detour", "Modified Service", and a chevron. The text is
- * never invented here; it is MVServiceStatus.desc exactly as sent.
- */
 @Composable
 fun AlertRow(category: Int, text: String, groupId: Int = 0) {
     if (category < 3 || text.isBlank()) return
@@ -318,8 +357,6 @@ fun AlertRow(category: Int, text: String, groupId: Int = 0) {
         Modifier.fillMaxWidth().padding(top = K.gap2)
             .clip(RoundedCornerShape(8.dp))
             .border(1.dp, tint, RoundedCornerShape(8.dp))
-            // the chevron promises a screen, so it only earns one when there is a
-            // line group to fetch the operator's wording for
             .then(
                 if (groupId > 0) Modifier.clickable(role = Role.Button) { open(groupId, text) }
                 else Modifier,
@@ -334,16 +371,6 @@ fun AlertRow(category: Int, text: String, groupId: Int = 0) {
     }
 }
 
-/* service alerts */
-
-/**
- * The alert behind the row, in the operator's own words.
- *
- * A plan leg carries only MVServiceStatus, a category and a short label such as
- * "Modified Service", so the text a rider actually wants has to be fetched:
- * V4/ServiceAlert/LineGroupsServiceAlerts for the ids, then ServiceAlertsById for
- * the wording. Nothing here is summarised or reworded.
- */
 @Composable
 fun ServiceAlertSheet(groupId: Int, fallbackLabel: String, onDismiss: () -> Unit) {
     var alerts by remember(groupId) { mutableStateOf<List<Moovit.ServiceAlert>?>(null) }
@@ -354,11 +381,6 @@ fun ServiceAlertSheet(groupId: Int, fallbackLabel: String, onDismiss: () -> Unit
             .onSuccess { alerts = it }
             .onFailure { failed = true }
     }
-    // The sheet used to be placed outright, at whatever height "Loading…" happened to
-    // need, and then jump to its full height when the fetch landed a moment later,
-    // which read as a stack appearing and then sticking rather than a panel sliding up.
-    // It now enters as one motion, and its own height changes are animated too, so the
-    // arriving text grows the panel instead of snapping it.
     var shown by remember(groupId) { mutableStateOf(false) }
     LaunchedEffect(groupId) { shown = true }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
@@ -387,11 +409,7 @@ fun ServiceAlertSheet(groupId: Int, fallbackLabel: String, onDismiss: () -> Unit
             ),
         ) {
         Column(
-            // consume the tap so the panel itself does not dismiss
             Modifier.fillMaxWidth()
-                // The same bottom edge the When sheet has to clear: this screen draws
-                // behind the floating tab bar, so a panel pinned to BottomCenter ends
-                // up with its last lines, and a long alert's scrolled tail, under it.
                 .padding(bottom = maxOf(bottomCover(), LocalBottomBarInset.current))
                 .padding(K.gap3)
                 .clip(RoundedCornerShape(K.rCard)).background(K.surface1)
@@ -399,9 +417,6 @@ fun ServiceAlertSheet(groupId: Int, fallbackLabel: String, onDismiss: () -> Unit
                 .padding(K.gap4)
                 .animateContentSize(),
         ) {
-            // The heading names which alert this is and Close is the way out of it;
-            // an operator's notice runs to pages, so both stay put and only the
-            // notice scrolls, rather than the way out leaving with the first screen.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     fallbackLabel.ifBlank { T("Service alert", "הודעת שירות") },
@@ -450,7 +465,6 @@ fun ServiceAlertSheet(groupId: Int, fallbackLabel: String, onDismiss: () -> Unit
     }
 }
 
-/** "From 8 Sep", "Until 12 Sep", "8–12 Sep", only what the server actually bounds. */
 private fun alertWindow(a: Moovit.ServiceAlert): String? {
     val day = java.text.SimpleDateFormat("d MMM", T.locale)
     fun at(t: Long) = day.format(java.util.Date(t * 1000))
@@ -462,7 +476,6 @@ private fun alertWindow(a: Moovit.ServiceAlert): String? {
     }
 }
 
-/** Operators publish most alert bodies as HTML; read it, do not print the markup. */
 private fun alertText(a: Moovit.ServiceAlert): String? {
     val raw = a.body.takeIf { it.isNotBlank() } ?: return null
     if (!a.html && !raw.contains('<')) return raw.trim()

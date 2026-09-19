@@ -9,7 +9,6 @@ import uk.noammm.kav.data.Moovit
 import uk.noammm.kav.data.TReader
 import uk.noammm.kav.data.TWriter
 
-/** Pure geometry over recorded fixtures; no network. */
 @RunWith(AndroidJUnit4::class)
 class GeometryRegressionTest {
     private val encoded = "_p~iF~ps|U_ulLnnqC_mqNvxq`@"
@@ -30,8 +29,6 @@ class GeometryRegressionTest {
 
     @Test
     fun testArrivalConfigurationRequestsTripShapeIds() {
-        // StopsArrivals uses the default configuration. Field 5 must be true or
-        // the server sends vehicle GPS without the route's tripShapeId.
         val conf = TReader(Moovit.arrivalsConf().stop().bytes()).readStruct()
         assertEquals(true, conf[5])
         assertEquals(true, conf[4])
@@ -77,7 +74,6 @@ class GeometryRegressionTest {
         assertEquals(-126.453, route.last().second, 1e-9)
         assertTrue(Moovit.tripShapeOf(78, entity).isEmpty())
 
-        // A different entity's field 2 must never be mistaken for route geometry.
         val wrongUnion = TWriter().structField(5, TWriter().i32Field(1, 77).strField(2, encoded))
             .stop().bytes()
         assertTrue(Moovit.tripShapeOf(77, TReader(wrongUnion).readStruct()).isEmpty())
@@ -147,9 +143,6 @@ class GeometryRegressionTest {
 
     @Test
     fun testMapCameraFocalPaddingCentresTheAnchor() {
-        // MapLibre centres the target inside the padded viewport. The overlay rotates
-        // about the anchor, so the padded centre must be the anchor exactly, on
-        // either side of the middle, and clamped at zero rather than negative.
         for ((ax, ay) in listOf(540f to 1584f, 200f to 300f, 1000f to 2000f, 540f to 1100f)) {
             val p = uk.noammm.kav.ui.focalPadding(androidx.compose.ui.geometry.Offset(ax, ay), 1080f, 2200f)
             p.forEach { assertTrue("padding must not be negative", it >= 0.0) }
@@ -160,23 +153,15 @@ class GeometryRegressionTest {
 
     @Test
     fun testMercatorRoundTripAndZoomUnits() {
-        // The overlay projection and MapLibre agree only if Geo is a true web
-        // mercator (round-trips) and the 256px zoom is MapLibre's 512px zoom + 1.
         for ((lat, lon) in listOf(32.0955 to 34.9567, 29.55 to 34.95, 33.3 to 35.57)) {
             assertEquals(lat, uk.noammm.kav.ui.Geo.lat(uk.noammm.kav.ui.Geo.y(lat)), 1e-9)
             assertEquals(lon, uk.noammm.kav.ui.Geo.lon(uk.noammm.kav.ui.Geo.x(lon)), 1e-9)
         }
-        // driveTo subtracts exactly 1 from the zoom; that is only right while the
-        // app's zoom unit stays the 256px tile against MapLibre's 512px one.
         assertEquals(256, uk.noammm.kav.ui.Geo.SIZE)
     }
 
     @Test
     fun testAlongPathRoundTripsThroughPointAlong() {
-        // alongPath's answer is handed straight to pointAlong. alongPath counted on a
-        // flat plane and pointAlong walks in metres, and the two scales differ by about
-        // a tenth of a percent, so the round trip drifted with the length of the line:
-        // nothing across a stop, tens of metres along a whole ride.
         val path = (0..400).map { (32.0 + it * 0.0005) to (34.8 + it * 0.0004) }
         for (p in listOf(path[3], path[100], path[250], path[400])) {
             val back = uk.noammm.kav.ui.pointAlong(path, uk.noammm.kav.ui.alongPath(p.first, p.second, path))!!
@@ -187,14 +172,6 @@ class GeometryRegressionTest {
 
     @Test
     fun testATransfersTwoMarkersLandOnOneSpot() {
-        // Moovit gives a same-stop transfer as one stop id shared by the ride that ends
-        // there and the ride that starts there, plus two leg shapes that meet at it.
-        // onRoute pulls the stop onto each leg's own line, and boardingMarkers merges
-        // the pair into one ring on the strength of both arriving at the same place, so
-        // that is what this holds: one stop, one point, reached down a 16 km leg and a
-        // 1 km one. It is deliberately not a guard on the drift above — a stop at the
-        // very end of a leg is the one place that drift cannot show, because overshoot
-        // clamps to path.last() and lands on the junction anyway.
         val junction = 32.122110 to 34.794210
         val stop = 32.122120 to 34.794165
         val arriving = (0..420).map { i ->
@@ -209,7 +186,6 @@ class GeometryRegressionTest {
         val on = uk.noammm.kav.ui.onRoute(stop, leaving)
         val apart = uk.noammm.kav.ui.metres(off.first, off.second, on.first, on.second)
         assertTrue("one stop was drawn as two rings $apart m apart", apart < 2.0)
-        // and neither may slide along its line away from the stop it names
         assertTrue(uk.noammm.kav.ui.metres(stop.first, stop.second, off.first, off.second) < 10.0)
         assertTrue(uk.noammm.kav.ui.metres(stop.first, stop.second, on.first, on.second) < 10.0)
     }
@@ -222,7 +198,6 @@ class GeometryRegressionTest {
 
     @Test
     fun testStopRailProgressGreysWithTheGroundNotOnArrival() {
-        // a straight ~1 km ride north, stops at 0, ~249, ~498 and ~995 m along it
         val shape = listOf(32.0000 to 34.8000, 32.0090 to 34.8000)
         val ids = listOf(1, 2, 3, 4)
         val stops = mapOf(
@@ -232,35 +207,25 @@ class GeometryRegressionTest {
             4 to Moovit.StopInfo(4, "d", "", 32.0090, 34.8000),
         )
         val ride = Moovit.Leg(Moovit.LegKind.RIDE, stops = ids, shape = shape)
-        // the phone, fresh and on the route, halfway between the second and third
-        // stop: two whole stops behind plus half the road to the next
         val mid = uk.noammm.kav.ui.Fix(32.003375, 34.8000, at = 1_000L, speed = 8f)
         val p = uk.noammm.kav.ui.stopsProgress(ride, stops, null, mid, 1_001L)
         assertEquals(2.5f, p, 0.15f)
-        // the tracked vehicle's own position outranks the phone
         val atThird = uk.noammm.kav.ui.stopsProgress(ride, stops, trackedVehicleAt(32.0045, 34.8000), mid, 1_001L)
         assertEquals(3.0f, atThird, 0.15f)
-        // nobody reporting anything: nobody knows, nothing greys
         assertEquals(-1f, uk.noammm.kav.ui.stopsProgress(ride, stops, null, null, 1_001L), 0f)
     }
 
     @Test
     fun testWalkCameraEngagesFromTheAlightingKerbAndHoldsThroughScatter() {
-        // a ~300 m walk east; the fixes that ended the ride sit ~55 m south of its
-        // start, across the junction from the walk's own polyline
         val path = listOf(32.0090 to 34.8000, 32.0090 to 34.8032)
         assertTrue(uk.noammm.kav.ui.onWalkNow(32.0085, 34.8000, path, held = false))
-        // the same 55 m bias mid-path only HOLDS a camera, it must not newly engage
-        // one: reading the card while off the walk still frames the walk itself
         assertFalse(uk.noammm.kav.ui.onWalkNow(32.0085, 34.8016, path, held = false))
         assertTrue(uk.noammm.kav.ui.onWalkNow(32.0085, 34.8016, path, held = true))
-        // and ~130 m off, even a held camera lets go
         assertFalse(uk.noammm.kav.ui.onWalkNow(32.0078, 34.8016, path, held = true))
     }
 
     @Test
     fun testTheWalkAfterARideIsReachedWhenTheStopMomentFellBetweenFixes() {
-        // A ~1 km ride north, then a ~300 m walk east from the alighting stop.
         val rideShape = listOf(32.0000 to 34.8000, 32.0090 to 34.8000)
         val walkShape = listOf(32.0090 to 34.8000, 32.0090 to 34.8032)
         val ride = Moovit.Leg(Moovit.LegKind.RIDE, shape = rideShape)
@@ -272,8 +237,6 @@ class GeometryRegressionTest {
             uk.noammm.kav.ui.Step.Walk(walk, -1, null, walkShape),
             uk.noammm.kav.ui.Step.Arrive("work", 0L, walkShape),
         )
-        // GPS slept through the stop itself: the first fresh fix lands 150 m down the
-        // walk, far outside the 45 m circle that used to be the only way off the ride.
         val late = uk.noammm.kav.ui.Fix(32.0090, 34.80159, at = 1_000L, speed = 1.4f)
         val next = uk.noammm.kav.ui.journeyProgress(steps, 2, Moovit.Resolved(), emptyMap(), 1_001L, late)
         assertEquals(3, next)
@@ -281,9 +244,6 @@ class GeometryRegressionTest {
 
     @Test
     fun testARideStillUnderWayKeepsItsVetoOverTheTransferWalk() {
-        // The transfer walk doubles back down the same corridor the bus drives, so the
-        // rider sits right on top of it 400 m before their stop. The screen must not
-        // jump to the walk while the bus is still carrying them.
         val rideShape = listOf(32.0000 to 34.8000, 32.0090 to 34.8000)
         val walkBack = listOf(32.0090 to 34.8000, 32.0050 to 34.8000)
         val ride = Moovit.Leg(Moovit.LegKind.RIDE, shape = rideShape)

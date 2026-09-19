@@ -4,15 +4,6 @@ import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.util.zip.GZIPInputStream
 
-/**
- * Reader for the KAV3 timetable bundle: stops, lines, trips and a per-stop
- * departure index, which is what the stops, lines and live screens browse.
- *
- * Nothing here touches Android, it is integer arrays and arithmetic, so it
- * stays testable on a plain JVM.
- */
-
-/** Growable int buffer. */
 private class IntVec(cap: Int = 1 shl 16) {
     var a = IntArray(cap)
     var n = 0
@@ -25,7 +16,6 @@ private class IntVec(cap: Int = 1 shl 16) {
 
 class Net private constructor() {
 
-    // stops
     lateinit var name: Array<String>; private set
     lateinit var lat: DoubleArray; private set
     lateinit var lon: DoubleArray; private set
@@ -33,39 +23,34 @@ class Net private constructor() {
     lateinit var cityOf: IntArray; private set
     lateinit var city: Array<String>; private set
 
-    // routes
     lateinit var rShort: Array<String>; private set
     lateinit var rLong: Array<String>; private set
     lateinit var rType: IntArray; private set
+    lateinit var rAgency: IntArray; private set
 
-    // trips (CSR of stop_times)
+    lateinit var agency: Array<String>; private set
+
     lateinit var tripRoute: IntArray; private set
     lateinit var tripStart: IntArray; private set
     lateinit var stStop: IntArray; private set
     lateinit var stArr: IntArray; private set
     lateinit var stDep: IntArray; private set
 
-    // connections, departure-sorted
-    lateinit var cST: IntArray; private set      // stop_time index
+    lateinit var cST: IntArray; private set
     lateinit var cTrip: IntArray; private set
 
-    // per-stop departure index
     lateinit var dStart: IntArray; private set
     lateinit var dConn: IntArray; private set
 
-    // search haystack
     lateinit var hay: Array<String>; private set
 
     val nStops get() = lat.size
-    val nTrips get() = tripRoute.size
     val nRoutes get() = rShort.size
 
     fun cityOf(s: Int): String = city.getOrElse(cityOf[s]) { "" }
+    fun agencyOf(r: Int): String = agency.getOrElse(rAgency.getOrElse(r) { -1 }) { "" }
     fun tripLast(t: Int): Int = stStop[tripStart[t + 1] - 1]
 
-    /* varint reader
-       Zigzag, exactly as the exporter writes it. The sign handling is the one
-       thing here that must not drift: a wrong decode moves stops kilometres. */
     private lateinit var b: ByteArray
     private var p = 0
 
@@ -89,10 +74,12 @@ class Net private constructor() {
     private fun parse(buf: ByteArray) {
         b = buf; p = 0
         val magic = String(b, 0, 4, StandardCharsets.US_ASCII)
-        if (magic != "KAV3") throw IllegalArgumentException("bad bundle: $magic")
+        if (magic != "KAV3" && magic != "KAV4") throw IllegalArgumentException("bad bundle: $magic")
+        val v4 = magic == "KAV4"
         p = 4
 
         val nS = vi(); val nR = vi(); val nT = vi(); val nC = vi()
+        agency = if (v4) Array(vi()) { vs() } else emptyArray()
 
         city = Array(nC) { vs() }
 
@@ -107,7 +94,11 @@ class Net private constructor() {
         }
 
         rShort = Array(nR) { "" }; rLong = Array(nR) { "" }; rType = IntArray(nR)
-        for (i in 0 until nR) { rShort[i] = vs(); rLong[i] = vs(); rType[i] = vi() }
+        rAgency = IntArray(nR) { -1 }
+        for (i in 0 until nR) {
+            rShort[i] = vs(); rLong[i] = vs(); rType[i] = vi()
+            if (v4) rAgency[i] = vi()
+        }
 
         tripRoute = IntArray(nT); tripStart = IntArray(nT + 1)
         val ss = IntVec(1 shl 21); val sa = IntVec(1 shl 21); val sd = IntVec(1 shl 21)
@@ -125,22 +116,11 @@ class Net private constructor() {
         tripStart[nT] = ss.n
         stStop = ss.trimmed(); stArr = sa.trimmed(); stDep = sd.trimmed()
 
-        // The footpaths and then the road polylines follow. Nothing reads either:
-        // the footpath graph existed only so the on-device planner could change
-        // between stops, and the map is its own file. Parsing stops here, so
-        // neither is ever allocated.
-
         hay = Array(nS) { (name[it] + " " + cityOf(it)).lowercase() }
-        b = ByteArray(0)   // let the 25 MB source buffer go before the arrays grow
+        b = ByteArray(0)
         buildConnections()
     }
 
-    /* A connection is the hop from stop_time j to j+1, so j and the trip index
-       describe it completely:
-         dep = stDep[j]  arr = stArr[j+1]  from = stStop[j]  to = stStop[j+1]
-       Storing those four separately cost five int arrays per connection; at
-       national scale (4.35M connections) that was ~122 MB. This keeps two, and
-       drops the `order` permutation by counting-sorting straight into place. */
     private fun buildConnections() {
         val nT = tripRoute.size
         var m = 0; var maxT = 0
@@ -167,7 +147,6 @@ class Net private constructor() {
             }
         }
 
-        // per-stop departures, already in time order
         val nS = lat.size
         dStart = IntArray(nS + 1)
         val deg = IntArray(nS)
@@ -179,7 +158,6 @@ class Net private constructor() {
     }
 
     companion object {
-        /** Reads a `.kav` or gzipped `.kav.gz` stream. */
         fun read(input: InputStream): Net {
             val raw = input.buffered().use { it.readBytes() }
             val bytes = if (raw.size > 2 && raw[0] == 0x1f.toByte() && raw[1] == 0x8b.toByte())

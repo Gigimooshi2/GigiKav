@@ -32,16 +32,9 @@ import kotlin.math.sin
 
 val DefaultAccent = Color(0xFF9ABEFF)
 
-/**
- * The rim of the wheel is as strong as the accent ever gets. The app is grey with one
- * colour on top of it, and that colour is text on the background and a fill under
- * dark text, past this it stops being legible in one of the two roles.
- */
 private const val MAX_SAT = 0.62f
 
 class AccentPreset(private val nameEn: String, private val nameHe: String, val hue: Float, val sat: Float) {
-    // Computed, not stored: a plain val here would read T.lang once at class-init
-    // time and freeze in that language for the process's lifetime.
     val label: String get() = T(nameEn, nameHe)
     val color: Color get() = Color.hsv(hue, sat, 1f)
 }
@@ -58,11 +51,6 @@ val AccentPresets = listOf(
 
 private fun hsvOf(c: Color): FloatArray = FloatArray(3).also { android.graphics.Color.colorToHSV(c.toArgb(), it) }
 
-/**
- * A wheel to drag a dot around, hue by angle, strength by distance from the centre,
- * and a row of presets under it. The choice is applied to [K.accent] as the dot moves,
- * so whatever is on screen recolours with it; [onChange] is where to persist it.
- */
 @Composable
 fun AccentPicker(modifier: Modifier = Modifier, wheel: androidx.compose.ui.unit.Dp = 240.dp, onChange: (Color) -> Unit) {
     val current = K.accent
@@ -93,7 +81,6 @@ fun AccentPicker(modifier: Modifier = Modifier, wheel: androidx.compose.ui.unit.
                 drawCircle(Brush.sweepGradient(rimColours, c), r, c)
                 drawCircle(Brush.radialGradient(listOf(Color.White, Color.White.copy(alpha = 0f)), c, r), r, c)
                 drawCircle(K.bg.copy(alpha = .35f), r, c, style = Stroke(1.dp.toPx()))
-                // the dot: where the current colour sits on the wheel
                 val angle = Math.toRadians(hsv[0].toDouble())
                 val dist = (hsv[1] / MAX_SAT).coerceIn(0f, 1f) * r
                 val dot = Offset(c.x + (cos(angle) * dist).toFloat(), c.y + (sin(angle) * dist).toFloat())
@@ -117,10 +104,6 @@ fun AccentPicker(modifier: Modifier = Modifier, wheel: androidx.compose.ui.unit.
     }
 }
 
-/**
- * A small Home screen, drawn with the app's own pieces so the colour lands on exactly
- * what it will land on: the search glyph, the resume link, the live step, Start.
- */
 @Composable
 fun AccentPreview(modifier: Modifier = Modifier) {
     Column(

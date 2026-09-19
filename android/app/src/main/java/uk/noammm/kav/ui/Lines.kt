@@ -7,9 +7,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import kotlinx.coroutines.flow.collect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -22,20 +24,24 @@ import kotlinx.coroutines.withContext
 import uk.noammm.kav.KavModel
 import uk.noammm.kav.data.Net
 import uk.noammm.kav.data.representativeTrip
+import uk.noammm.kav.data.nearestStops
 import uk.noammm.kav.data.searchRoutes
 
-/** GTFS route_type values as the Israeli MOT feed uses them. */
 private val FILTERS = listOf(
-    "All" to -1, "Bus" to 3, "Train" to 2, "Light rail" to 0, "Share taxi" to 715,
+    "All" to intArrayOf(),
+    "Bus" to intArrayOf(3, 11, 715, 8),
+    "Light rail" to intArrayOf(0, 1, 12),
+    "Israel Railways" to intArrayOf(2),
+    "Carmelit / Rakavlit" to intArrayOf(7, 5, 6),
+    "Shuttle" to intArrayOf(711),
 )
 
-/** FILTERS' English labels are used only as lookup ids for [mode]; translate at render time
- *  instead of inside the top-level list, so switching [T.lang] actually recomposes the chips. */
 private fun filterLabel(label: String): String = when (label) {
     "Bus" -> T("Bus", "אוטובוס")
-    "Train" -> T("Train", "רכבת")
     "Light rail" -> T("Light rail", "רכבת קלה")
-    "Share taxi" -> T("Share taxi", "מונית שירות")
+    "Israel Railways" -> T("Israel Railways", "רכבת ישראל")
+    "Carmelit / Rakavlit" -> T("Carmelit / Rakavlit", "כרמלית / רכבלית")
+    "Shuttle" -> T("Shuttle", "שאטל")
     else -> T("All", "הכול")
 }
 
@@ -60,16 +66,26 @@ private fun LinesBody(model: KavModel, net: Net) {
 
 @Composable
 private fun LineList(model: KavModel, net: Net) {
-    // held by the model: opening a line disposes this list (see KavModel.lineQuery)
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     var q by model::lineQuery
-    var mode by remember { mutableIntStateOf(-1) }
-    var hits by remember(net) { mutableStateOf(emptyList<Int>()) }
+    var types by remember { mutableStateOf(FILTERS[0].second) }
+    var sections by remember(net) { mutableStateOf(emptyList<Pair<String, List<LineRow>>>()) }
     var endpoints by remember(net) { mutableStateOf(emptyMap<Int, Pair<Int, Int>>()) }
     LaunchedEffect(net) {
         endpoints = withContext(Dispatchers.Default) { lineEndpoints(net) }
     }
-    LaunchedEffect(net, q, mode) {
-        hits = withContext(Dispatchers.Default) { net.searchRoutes(q, mode).toList() }
+    LaunchedEffect(net, q, types, endpoints) {
+        sections = withContext(Dispatchers.Default) { foldLines(net, q, types, endpoints) }
+    }
+    var lead by remember(net) { mutableStateOf(emptyList<Pair<String, List<LineRow>>>()) }
+    LaunchedEffect(Unit) {
+        if (model.here == null && uk.noammm.kav.hasLocationPermission(ctx)) {
+            uk.noammm.kav.requestLocationOnce(ctx) { model.here = it }
+        }
+    }
+    LaunchedEffect(net, endpoints, model.here, q, types) {
+        lead = if (q.isNotBlank() || types.isNotEmpty()) emptyList()
+        else withContext(Dispatchers.Default) { leadSections(ctx, net, model.here, endpoints) }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -82,39 +98,65 @@ private fun LineList(model: KavModel, net: Net) {
                 .padding(horizontal = K.gap3),
             horizontalArrangement = Arrangement.spacedBy(K.gap2),
         ) {
-            FILTERS.forEach { (label, t) -> Chip(filterLabel(label), mode == t) { mode = t } }
+            FILTERS.forEach { (label, t) -> Chip(filterLabel(label), types === t) { types = t } }
         }
         Spacer(Modifier.height(K.gap3))
+        val total = sections.sumOf { it.second.size }
         Text(
-            T("${hits.size} routes · choose a line to see its stops", "${hits.size} קווים · בחרו קו כדי לראות את התחנות שלו"),
+            T("$total lines · choose a line to see its stops", "$total קווים · בחרו קו כדי לראות את התחנות שלו"),
             fontSize = 12.sp, color = K.dim,
             modifier = Modifier.padding(horizontal = K.gap4),
         )
         Spacer(Modifier.height(K.gap1))
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(
+        val listState = rememberLazyListState()
+        var scrolled by remember(net) { mutableStateOf(false) }
+        LaunchedEffect(listState) {
+            snapshotFlow { listState.isScrollInProgress }.collect { if (it) scrolled = true }
+        }
+        LaunchedEffect(lead) { if (lead.isNotEmpty() && !scrolled) listState.scrollToItem(0) }
+        LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(
             start = K.gap2, end = K.gap2, bottom = LocalBottomBarInset.current,
         )) {
-            items(hits, key = { it }) { r ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = K.gap1)
-                        .clip(RoundedCornerShape(K.rControl)).background(K.surface1)
-                        .clickable { model.lineRoute = r }
-                        .padding(K.gap3),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(K.gap3),
-                ) {
-                    LineIdentity(net, r)
-                    LineDirection(net, endpoints[r], Modifier.weight(1f))
-                    Text(T.onward, fontSize = 22.sp, color = K.dim)
+            lead.forEach { (label, rows) ->
+                item(key = "lead-$label") { SectionLabel(label) }
+                items(rows, key = { "lead-$label-${it.route}" }) { row -> LineRowCard(model, net, row) }
+            }
+            sections.forEach { (operator, rows) ->
+                if (operator.isNotBlank()) item(key = "op-$operator") {
+                    SectionLabel(operatorLabel(operator))
                 }
+                items(rows, key = { it.route }) { row -> LineRowCard(model, net, row) }
             }
         }
     }
 }
 
-/** One pass over trips, using the same longest-run policy as the stop list. */
+@Composable
+private fun SectionLabel(label: String) {
+    Text(
+        label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = K.dim,
+        modifier = Modifier.padding(start = K.gap2, end = K.gap2, top = K.gap3, bottom = K.gap1),
+    )
+}
+
+@Composable
+private fun LineRowCard(model: KavModel, net: Net, row: LineRow) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = K.gap1)
+            .clip(RoundedCornerShape(K.rControl)).background(K.surface1)
+            .clickable { model.lineRoute = row.route }
+            .padding(K.gap3),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(K.gap3),
+    ) {
+        LineIdentity(net, row.route)
+        LineSpan(net, row, Modifier.weight(1f))
+        Text(T.onward, fontSize = 22.sp, color = K.dim)
+    }
+}
+
 private fun lineEndpoints(net: Net): Map<Int, Pair<Int, Int>> {
     val longest = IntArray(net.nRoutes) { -1 }
     for (t in net.tripRoute.indices) {
@@ -131,12 +173,139 @@ private fun lineEndpoints(net: Net): Map<Int, Pair<Int, Int>> {
     }
 }
 
+private data class LineRow(val route: Int, val a: Int, val b: Int, val both: Boolean)
+
+private fun terminusName(net: Net, stop: Int): String = net.name[stop].substringBefore('/').trim()
+
+internal fun lineKey(net: Net, r: Int) =
+    "${net.rAgency.getOrElse(r) { -1 }}|${net.rType[r]}|${net.rShort[r]}|${net.rLong[r]}"
+
+private fun namesakeEnds(net: Net, ends: Map<Int, Pair<Int, Int>>): Map<String, Pair<Int, Int>> {
+    val byName = HashMap<String, Pair<Int, Int>>(ends.size * 2)
+    for ((r, e) in ends) byName.putIfAbsent(lineKey(net, r), e)
+    return byName
+}
+
+private fun foldRoutes(
+    net: Net, routes: Iterable<Int>, ends: Map<Int, Pair<Int, Int>>,
+    byName: Map<String, Pair<Int, Int>>,
+): Collection<LineRow> {
+    val rows = LinkedHashMap<String, LineRow>()
+    for (r in routes) {
+        val e = ends[r] ?: byName[lineKey(net, r)]
+        if (e == null && ends.isNotEmpty()) continue
+        val key = if (e == null) "lone-$r" else {
+            val a = terminusName(net, e.first); val b = terminusName(net, e.second)
+            val (lo, hi) = if (a <= b) a to b else b to a
+            "${net.rAgency.getOrElse(r) { -1 }}|${net.rType[r]}|${net.rShort[r]}|$lo $hi"
+        }
+        val prev = rows[key]
+        if (prev == null) rows[key] = LineRow(r, e?.first ?: -1, e?.second ?: -1, false)
+        else if (!prev.both) rows[key] = prev.copy(both = true)
+    }
+    return rows.values
+}
+
+private fun foldLines(
+    net: Net, q: String, types: IntArray, ends: Map<Int, Pair<Int, Int>>,
+): List<Pair<String, List<LineRow>>> {
+    val rows = foldRoutes(net, net.searchRoutes(q, types).asIterable(), ends, namesakeEnds(net, ends))
+    return rows.groupBy { net.agencyOf(it.route) }.mapValues { (_, rs) ->
+        rs.sortedWith(compareBy(
+            { net.rShort[it.route].toIntOrNull() ?: Int.MAX_VALUE },
+            { net.rShort[it.route] },
+            { if (it.a >= 0) terminusName(net, it.a) else "" },
+        ))
+    }.toList()
+}
+
+private fun leadSections(
+    ctx: android.content.Context, net: Net, here: Pair<Double, Double>?,
+    ends: Map<Int, Pair<Int, Int>>,
+): List<Pair<String, List<LineRow>>> {
+    if (ends.isEmpty()) return emptyList()
+    val byName = namesakeEnds(net, ends)
+    val out = ArrayList<Pair<String, List<LineRow>>>()
+
+    val recent = uk.noammm.kav.Prefs.recentLines(ctx)
+    if (recent.isNotEmpty()) {
+        val slot = HashMap<String, Int>()
+        recent.forEachIndexed { i, k -> slot.putIfAbsent(k, i) }
+        val routes = arrayOfNulls<Int>(recent.size)
+        for (r in 0 until net.nRoutes) {
+            val i = slot[lineKey(net, r)] ?: continue
+            if (routes[i] == null) routes[i] = r
+        }
+        val rows = foldRoutes(net, routes.filterNotNull(), ends, byName).toList()
+        if (rows.isNotEmpty()) out.add(T("Recent", "אחרונים") to rows)
+    }
+
+    if (here != null) {
+        val near = net.nearestStops(here.first, here.second, k = 20, radius = 900.0)
+        if (near.isNotEmpty()) {
+            val rank = HashMap<Int, Int>(near.size * 2)
+            near.forEachIndexed { i, (s, _) -> rank[s] = i }
+            val best = HashMap<Int, Int>()
+            for (t in net.tripRoute.indices) {
+                val route = net.tripRoute[t]
+                for (i in net.tripStart[t] until net.tripStart[t + 1]) {
+                    val o = rank[net.stStop[i]] ?: continue
+                    val held = best[route]
+                    if (held == null || o < held) best[route] = o
+                }
+            }
+            val routes = best.entries.sortedBy { it.value }.map { it.key }
+            val rows = foldRoutes(net, routes, ends, byName).take(10)
+            if (rows.isNotEmpty()) out.add(T("Nearby", "בקרבת מקום") to rows)
+        }
+    }
+    return out
+}
+
+private fun operatorLabel(name: String): String = when (name) {
+    "רכבת ישראל" -> T("Israel Railways", "רכבת ישראל")
+    "כרמלית" -> T("Carmelit", "כרמלית")
+    "כבל אקספרס" -> T("Rakavlit (Cable Express)", "רכבלית (כבל אקספרס)")
+    "דן נתיבים בעמ" -> T("Dan Nativim", "דן נתיבים")
+    else -> name
+}
+
+@Composable
+private fun LineSpan(net: Net, row: LineRow, modifier: Modifier = Modifier) {
+    if (row.a < 0) {
+        Text(T("Route stops", "תחנות המסלול"), fontSize = 15.sp, color = K.muted, modifier = modifier)
+        return
+    }
+    val a = terminusName(net, row.a); val b = terminusName(net, row.b)
+    val text = when {
+        a == b -> "⁨$a⁩"
+        row.both -> "⁨$a⁩ ↔ ⁨$b⁩"
+        else -> "⁨$a⁩ → ⁨$b⁩"
+    }
+    Text(
+        text, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium,
+        color = K.text, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = modifier,
+    )
+}
+
 @Composable
 private fun LineIdentity(net: Net, route: Int) {
+    val rt = net.rType[route]
+    val marked = rt == 711 || isRail(rt, -1) || modeOf(rt) == Mode.FUNICULAR ||
+        modeOf(rt) == Mode.CABLE || modeOf(rt) == Mode.GONDOLA
+    val logoOnly = modeOf(rt) == Mode.FUNICULAR || modeOf(rt) == Mode.CABLE ||
+        modeOf(rt) == Mode.GONDOLA
+    val number = net.rShort[route]
     Column(Modifier.widthIn(min = 54.dp, max = 88.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(net.rShort[route].ifBlank { "—" }, fontSize = 23.sp, color = K.text,
-            fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(modeName(modeOf(net.rType[route])), fontSize = 11.sp, color = K.dim)
+        if (marked) {
+            AgencyMark(rt, -1, K.muted, if (number.isBlank() || logoOnly) 26.dp else 17.dp)
+            Spacer(Modifier.height(2.dp))
+        }
+        if ((number.isNotBlank() && !logoOnly) || !marked) {
+            Text(number.ifBlank { "—" }, fontSize = 23.sp, color = K.text,
+                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(typeName(rt), fontSize = 11.sp, color = K.dim)
     }
 }
 
@@ -157,8 +326,8 @@ private fun LineDirection(net: Net, endpoints: Pair<Int, Int>?, modifier: Modifi
 
 @Composable
 internal fun LineDetail(model: KavModel, net: Net, route: Int, onBack: () -> Unit) {
-    // scanning 123k trips for the longest one is milliseconds, but not on the
-    // frame that draws the screen
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(route) { uk.noammm.kav.Prefs.rememberLine(ctx, lineKey(net, route)) }
     var stops by remember(route) { mutableStateOf<List<Int>?>(null) }
     LaunchedEffect(route) {
         stops = withContext(Dispatchers.Default) {
@@ -200,7 +369,6 @@ internal fun LineDetail(model: KavModel, net: Net, route: Int, onBack: () -> Uni
                             .padding(horizontal = K.gap3, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // the rail: a continuous line with a node at every stop
                         Box(Modifier.width(18.dp), contentAlignment = Alignment.Center) {
                             Box(
                                 Modifier.size(7.dp)

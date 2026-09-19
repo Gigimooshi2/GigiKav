@@ -21,14 +21,6 @@ import androidx.compose.ui.unit.sp
 import uk.noammm.kav.Prefs
 import uk.noammm.kav.data.MapFile
 
-/**
- * The first launch: choose the language, pick the colour, say what a plan may
- * contain, then fetch the map. All but the last are the same controls Settings has,
- * so nothing learned here has to be learned again; the last is the same offer the
- * map itself makes.
- *
- * Language comes first because every page after it is written in the answer.
- */
 @Composable
 fun OnboardingScreen(onDone: () -> Unit) {
     val ctx = LocalContext.current
@@ -46,9 +38,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
         ) {
             Spacer(Modifier.height(K.gap6))
             if (p == 0) {
-                // Asked in both languages, because at this point Kav has been told
-                // neither, and the phone's own language is no evidence: stop and line
-                // names arrive from Moovit in Hebrew whichever way the phone is set.
                 Text("בחרו שפה", style = Display, fontSize = 26.sp)
                 Text("Choose a language", style = Display, fontSize = 26.sp, color = K.dim)
                 Spacer(Modifier.height(K.gap6))
@@ -93,6 +82,23 @@ fun OnboardingScreen(onDone: () -> Unit) {
                         Prefs.setFilter(ctx, f, on)
                     }
                 }
+                Spacer(Modifier.height(K.gap5))
+                Text(
+                    T("what a card shows", "מה מוצג בכרטיס"),
+                    style = DisplayItalic, fontSize = 12.sp, color = K.dim,
+                    modifier = Modifier.padding(start = K.gap3, bottom = K.gap2),
+                )
+                Column(Modifier.fillMaxWidth().padding(horizontal = K.gap3)) {
+                    SwitchRow(
+                        T("Emissions", "פליטות"),
+                        T(
+                            "The CO2e figure on every plan and on the trip you open.",
+                            "נתון ה-CO2e על כל מסלול ועל הנסיעה שאתם פותחים.",
+                        ),
+                        Shown.co2,
+                        { on -> Shown.co2 = on; Prefs.setShowCo2(ctx, on) },
+                    ) { GlobeGlyph(if (Shown.co2) K.text else K.dim, K.surface1, 18.dp) }
+                }
                 Spacer(Modifier.height(K.gap8))
                 OnboardingButton(T("Next", "הבא")) { page = 3 }
             } else {
@@ -126,13 +132,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     else -> {}
                 }
                 Spacer(Modifier.height(K.gap8))
-                // The map is not optional here and there is no way past it: no "continue
-                // while it downloads" and no Later. Both were exits taken mid-fetch, and
-                // the rider who took one landed in an app still offering to download the
-                // map on every screen. The choice is made once, before the download starts:
-                // the only exit is Done, and Done only exists once the file is on disk. A
-                // failed download leaves Try again instead. The spacer stays so the page
-                // does not jump as the button under it changes.
                 when (state) {
                     is MapFile.State.Ready -> OnboardingButton(T("Done", "סיום"), onClick = onDone)
                     is MapFile.State.Downloading -> {}

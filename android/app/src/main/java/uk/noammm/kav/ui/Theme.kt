@@ -14,7 +14,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** Neutral grouped surfaces with one quiet accent for actions and live guidance. */
 object K {
     val bg = Color(0xFF101012)
     val surface1 = Color(0xFF202023)
@@ -36,11 +35,6 @@ object K {
     val rControl = 16.dp
     val rPill = 999.dp
 
-    /**
-     * The one colour in the app. It is state rather than a constant so the picker can
-     * change it while you watch; Prefs keeps whatever was chosen. Everything that used
-     * to name a separate route or live tint reads the same value.
-     */
     var accent by mutableStateOf(DefaultAccent)
     val route get() = accent
     val live get() = accent
@@ -53,7 +47,10 @@ object K {
     val gap4 = 16.dp; val gap5 = 20.dp; val gap6 = 24.dp; val gap8 = 32.dp
 }
 
-/** Native sans-serif headings, with weight carrying hierarchy. */
+object Shown {
+    var co2 by mutableStateOf(false)
+}
+
 val Display = TextStyle(
     fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
     fontSize = 21.sp, color = K.text,
@@ -61,11 +58,6 @@ val Display = TextStyle(
 val DisplayItalic = Display.copy(fontWeight = FontWeight.Medium)
 val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = K.muted)
 
-// The container slots matter as much as the base ones: a Material component that
-// paints a "selected" or "filled" state reaches for primaryContainer, and anything
-// left unset falls through to darkColorScheme's own purple, which is how the time
-// field in the departure sheet came out lilac in a monochrome app. Every slot the
-// app can reach is a grey from K.
 private val scheme = darkColorScheme(
     primary = K.text, onPrimary = K.bg,
     primaryContainer = K.surface3, onPrimaryContainer = K.text,
@@ -89,8 +81,6 @@ private val scheme = darkColorScheme(
 
 @Composable
 fun KavTheme(content: @Composable () -> Unit) {
-    // There is no light theme. The map palette this is built around only exists
-    // in the dark one, and a second palette would be a second thing to keep true.
     MaterialTheme(
         colorScheme = scheme,
         typography = Typography(

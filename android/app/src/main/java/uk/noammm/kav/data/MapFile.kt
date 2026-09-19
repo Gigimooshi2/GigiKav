@@ -14,21 +14,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/**
- * The basemap is a single PMTiles archive of Israel, Protomaps' OpenStreetMap build,
- * cut to the country, rendered on the phone by MapLibre. Once this file is here the
- * map asks the network for nothing, ever: no tile service sees where you look.
- *
- * The archive is too big to put inside the APK, so it rides the same channel updates
- * do: an asset on a GitHub release. The release is marked as a pre-release, which
- * keeps it out of `releases/latest` and therefore out of the updater's way.
- */
 object MapFile {
-    /** The release tag holding the archive; a new map is a new tag and a new [BYTES]. */
     const val TAG = "map-1"
     const val URL = "https://github.com/${Updates.OWNER}/${Updates.REPO}/releases/download/$TAG/israel.pmtiles"
 
-    /** Exact size of the archive, so progress and "is it whole" need no server call. */
     const val BYTES = 185_001_087L
 
     sealed interface State {
@@ -45,11 +34,8 @@ object MapFile {
 
     fun file(ctx: Context) = File(File(ctx.filesDir, "map"), "israel.pmtiles")
 
-    /** Look once at launch; also sweep away the raster tile cache earlier builds left behind. */
     fun init(ctx: Context) {
         val app = ctx.applicationContext
-        // A recreated activity calls this while a download the process kept may still
-        // be streaming; overwriting its state would offer a second, interleaved writer.
         if (state !is State.Downloading) state = if (file(app).length() == BYTES) State.Ready else State.Missing
         scope.launch {
             File(app.filesDir, "tiles-esri").listFiles()?.forEach { it.delete() }
@@ -57,15 +43,10 @@ object MapFile {
         }
     }
 
-    /** The bundled style, pointed at wherever this phone keeps the archive. */
     fun styleJson(ctx: Context): String =
         ctx.assets.open("map/style.json").reader().use { it.readText() }
             .replace("__MAP__", "pmtiles://file://" + file(ctx).absolutePath)
 
-    /**
-     * Fetch the archive, resuming a part file if one was left. Runs in MapFile's own
-     * scope: leaving the screen that started a 185 MB download must not abandon it.
-     */
     fun startDownload(ctx: Context) {
         if (state is State.Downloading || state is State.Ready) return
         val app = ctx.applicationContext
@@ -89,7 +70,6 @@ object MapFile {
         if (file.length() == BYTES) return
         val part = File(file.path + ".part")
         var have = part.length()
-        // a whole part is a finished download whose rename was interrupted, keep it
         if (have == BYTES && part.renameTo(file)) return
         if (have >= BYTES) { part.delete(); have = 0 }
 
@@ -97,8 +77,6 @@ object MapFile {
         c.connectTimeout = 15_000; c.readTimeout = 30_000
         c.setRequestProperty("User-Agent", "Kav")
         if (have > 0) c.setRequestProperty("Range", "bytes=$have-")
-        // GitHub hands assets off to another host; follow within https by hand, the
-        // way Updates.download does, keeping the Range header on the hop.
         var hops = 0
         while (c.responseCode in 300..399 && hops < 5) {
             val next = c.getHeaderField("Location") ?: break
@@ -110,7 +88,7 @@ object MapFile {
             hops++
         }
         when (c.responseCode) {
-            200 -> { have = 0; part.delete() } // the server ignored the range
+            200 -> { have = 0; part.delete() }
             206 -> {}
             else -> throw RuntimeException(T("Download HTTP ${c.responseCode}", "הורדה נכשלה, שגיאת HTTP ${c.responseCode}"))
         }
@@ -131,7 +109,6 @@ object MapFile {
         if (!part.renameTo(file)) throw RuntimeException(T("Could not keep the download", "לא ניתן היה לשמור את ההורדה"))
     }
 
-    /** Free the space; the map goes back to offering its download. */
     fun remove(ctx: Context) {
         file(ctx).delete()
         File(file(ctx).path + ".part").delete()

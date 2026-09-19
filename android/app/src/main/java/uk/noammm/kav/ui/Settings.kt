@@ -1,19 +1,29 @@
 package uk.noammm.kav.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uk.noammm.kav.KavModel
+import uk.noammm.kav.PendingBackup
 import uk.noammm.kav.Prefs
-import uk.noammm.kav.data.Updates
+import uk.noammm.kav.data.Backup
 
 @Composable
 fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
@@ -34,12 +44,25 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
         Group(T("what a plan may show", "מה מסלול יכול לכלול"))
         FilterRows(model.filters) { f, on -> model.setFilter(ctx, f, on) }
 
+        Group(T("what a card shows", "מה מוצג בכרטיס"))
+        Column(Modifier.fillMaxWidth().padding(horizontal = K.gap3)) {
+            SwitchRow(
+                T("Emissions", "פליטות"),
+                T(
+                    "The CO2e figure on every plan and on the trip you open.",
+                    "נתון ה-CO2e על כל מסלול ועל הנסיעה שאתם פותחים.",
+                ),
+                Shown.co2,
+                { on -> Shown.co2 = on; Prefs.setShowCo2(ctx, on) },
+            ) { GlobeGlyph(if (Shown.co2) K.text else K.dim, K.surface1, 18.dp) }
+        }
+
+        Group(T("your data", "הנתונים שלכם"))
+        BackupSection(model)
+
         Group(T("updates", "עדכונים"))
         UpdateSection(model)
 
-        /* The point of the project, stated where it can be checked rather than
-           only claimed in a README. Counts are class-path references measured in
-           com.tranzmate 5.199.1.1804. */
         Group(T("what is not in here", "מה לא נמצא כאן"))
         Absent(
             T("No account", "אין חשבון"),
@@ -84,13 +107,6 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
     }
 }
 
-/**
- * Kav's own words, and only those. Moovit answers in Hebrew whatever the phone is
- * set to, so following the system language left a rider whose phone is in English
- * reading Hebrew stop names inside English sentences, with no way to settle either
- * half. This is the half Kav owns, and it is switched here rather than in Android's
- * per-app language because minSdk is 26 and that is an API 33 feature.
- */
 @Composable
 private fun LanguageRow(ctx: android.content.Context) {
     Row(
@@ -100,6 +116,68 @@ private fun LanguageRow(ctx: android.content.Context) {
         for (l in Lang.entries) {
             Chip(l.label, T.lang == l) { T.switchTo(l); Prefs.setLang(ctx, l) }
         }
+    }
+}
+
+@Composable
+private fun BackupSection(model: KavModel) {
+    val ctx = LocalContext.current
+    fun toast(s: String) = android.widget.Toast.makeText(ctx, s, android.widget.Toast.LENGTH_SHORT).show()
+
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(Backup.MIME)) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        Backup.write(ctx, uri)
+            .onSuccess { toast(T("Backup saved", "הגיבוי נשמר")) }
+            .onFailure { toast(T("Couldn't write that file", "לא ניתן היה לכתוב את הקובץ")) }
+    }
+    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) PendingBackup.uri = uri
+    }
+
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = K.gap3),
+        verticalArrangement = Arrangement.spacedBy(K.gap2),
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+            ActionTile(
+                Modifier.weight(1f),
+                T("Import", "ייבוא"),
+                T("from a .kav file", "מקובץ ‎.kav"),
+            ) { open.launch(arrayOf("*/*")) }
+            ActionTile(
+                Modifier.weight(1f),
+                T("Export", "ייצוא"),
+                T("to a .kav file", "לקובץ ‎.kav"),
+            ) { save.launch(Backup.suggestedName()) }
+        }
+        Text(
+            T(
+                "A .kav file holds your saved places, trip history, searches and settings. " +
+                    "Importing replaces what is here; the map is not part of it.",
+                "קובץ ‎.kav מכיל את המקומות השמורים, היסטוריית הנסיעות, החיפושים וההגדרות שלכם. " +
+                    "ייבוא מחליף את מה שנמצא כאן; המפה אינה חלק ממנו.",
+            ),
+            fontSize = 11.sp, color = K.dim, lineHeight = 16.sp,
+            modifier = Modifier.padding(start = 2.dp, end = 2.dp),
+        )
+    }
+}
+
+internal fun importError(e: Throwable): String =
+    if (e is Backup.NotABackup) T("That file isn't a Kav backup.", "הקובץ הזה אינו גיבוי של Kav.")
+    else T("Couldn't read that file.", "לא ניתן היה לקרוא את הקובץ.")
+
+@Composable
+private fun ActionTile(modifier: Modifier, label: String, sub: String, onClick: () -> Unit) {
+    Column(
+        modifier.clip(RoundedCornerShape(14.dp)).background(K.plate)
+            .border(1.dp, K.border, RoundedCornerShape(14.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = K.gap3, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(label, fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium)
+        Text(sub, fontSize = 11.sp, color = K.dim, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
@@ -120,7 +198,6 @@ private fun Group(title: String) {
     )
 }
 
-/** A struck-through title: the surface exists in the app this one replaces. */
 @Composable
 private fun Absent(title: String, desc: String) {
     Row(

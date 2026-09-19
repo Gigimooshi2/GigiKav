@@ -8,7 +8,6 @@ import org.json.JSONObject
 import uk.noammm.kav.data.JourneyFile
 import uk.noammm.kav.data.Moovit
 
-/** The journey codec round-tripped through its own JSON; no disk, no network. */
 @RunWith(AndroidJUnit4::class)
 class JourneyFileRegressionTest {
 
@@ -74,8 +73,6 @@ class JourneyFileRegressionTest {
         assertEquals(before.toLabel, after.toLabel)
         assertEquals(before.chosen, after.chosen)
 
-        // Leg and Departure are data classes: one equality covers every field of
-        // every leg, the nested departures and alternatives and the taxi ends too.
         assertEquals(before.trip.legs, after.trip.legs)
         assertEquals(before.trip.guid, after.trip.guid)
         assertEquals(before.trip.group, after.trip.group)
@@ -101,12 +98,10 @@ class JourneyFileRegressionTest {
         assertEquals("ת. מרכזית ת\"א", named.name)
         assertEquals("20100", named.code)
         assertEquals(32.0853 to 34.7818, named.point)
-        // a stop with no position must come back with none, not with a broken one
         assertNull(after.resolved.stops.getValue(22775).point)
 
         assertEquals(before.resolved.routeTypes, after.resolved.routeTypes)
         assertEquals(before.resolved.shapes, after.resolved.shapes)
-        // the live layer and its patterns are refetched, never restored
         assertTrue(after.resolved.live.isEmpty())
         assertTrue(after.resolved.patterns.isEmpty())
     }

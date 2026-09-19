@@ -17,7 +17,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uk.noammm.kav.data.Moovit
 
-/** Gett's documented order-screen link. The drop-off is this TAXI leg's end. */
 internal fun gettUri(leg: Moovit.Leg): Uri? {
     if (leg.kind != Moovit.LegKind.TAXI) return null
     val pickup = leg.taxiPickup ?: leg.shape.takeIf { it.size >= 2 }?.first()

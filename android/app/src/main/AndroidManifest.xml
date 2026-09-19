@@ -19,6 +19,15 @@
          Android asks you once, per app, before it will take an APK from one. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- A trip under way lives in the shade as an ongoing notification, and the
+         service behind it keeps the process up so the live times in it stay true
+         while the app is away. "Special use" is the honest type: the system's
+         named categories are about location and media, and this is neither — it
+         tracks nothing, it holds a ride open. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
     <!-- Deliberately NOT declared, and why each one is refused:
            ADVERTISING_ID            - there is no advertising
            ACCESS_BACKGROUND_LOCATION- nothing tracks you between sessions
@@ -35,6 +44,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:supportsPictureInPicture="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize">
@@ -42,7 +52,72 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Shared trips travel as Moovit's own directions links, so either app
+                 can open what either app sent. singleTask above is what routes a
+                 link into the running copy instead of stacking a second one. The
+                 https form belongs to their site, so Android will not hand it over
+                 without being told to; the moovit: scheme has no owner to verify,
+                 and that one offers Kav in the chooser as it should. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="moovit" android:host="directions" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="moovitapp.com" android:path="/directions" />
+            </intent-filter>
+            <!-- A .kav backup tapped in a file manager. Matched by the name's ending
+                 rather than a type, because .kav has no registered MIME and claiming
+                 application/octet-stream would put Kav in the chooser for every
+                 unknown file on the phone. pathPattern's wildcard does not cross a
+                 dot, so a name with dots in it needs one line per dot; three covers
+                 anything a rider is likely to have renamed a backup to. A file
+                 manager that hands over a content:// URI carrying no name in its
+                 path cannot be matched this way at all — Settings › Import is the
+                 way in for those. -->
+            <intent-filter android:label="@string/app_name">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.kav" />
+                <data android:pathPattern=".*\\..*\\.kav" />
+                <data android:pathPattern=".*\\..*\\..*\\.kav" />
+            </intent-filter>
+            <!-- The same again with no mimeType, because a filter that declares one
+                 only matches an intent that carries one. Android derives a file://
+                 URI's type from its extension, and .kav is in no MIME map, so a file
+                 manager sending a bare VIEW would miss the filter above entirely.
+                 Verified both ways with `cmd package query-activities`. -->
+            <intent-filter android:label="@string/app_name">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.kav" />
+                <data android:pathPattern=".*\\..*\\.kav" />
+                <data android:pathPattern=".*\\..*\\..*\\.kav" />
+            </intent-filter>
         </activity>
+
+        <!-- the ongoing trip notification's anchor; it holds the process and nothing else -->
+        <service
+            android:name=".TripService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="ongoing transit trip status" />
+        </service>
 
         <!-- the downloaded update, readable by the installer and nobody else -->
         <provider

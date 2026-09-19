@@ -11,7 +11,6 @@ import uk.noammm.kav.data.TReader
 import uk.noammm.kav.data.TType
 import uk.noammm.kav.data.TWriter
 
-/** Actual 2026-09-08 TripPlanner response: lines 11 and 74 at the same stop. */
 @RunWith(AndroidJUnit4::class)
 class AlternativesRegressionTest {
     private fun legs(): List<Moovit.Leg> {
@@ -21,13 +20,6 @@ class AlternativesRegressionTest {
         return (0 until pair.length()).map { Moovit.parseLeg(pair.getJSONObject(it)) }
     }
 
-    /**
-     * The leg's MVTime is still kept, so the plan's chosen departure survives a
-     * futureDepartures list that omits it, but it is a timetable entry, not a
-     * tracked one. Moovit builds the schedule it colours from futureDepartures alone,
-     * and the server sets MVTime.isRealTime even on lines whose arrivals carry no
-     * rtEtdUTC, which painted statistical times as live.
-     */
     @Test
     fun testSelectedWaitDepartureIsKeptButIsNotTracked() {
         val wait = legs()[0]
@@ -46,11 +38,6 @@ class AlternativesRegressionTest {
         assertEquals(0L, selected.rtUtc)
     }
 
-    /**
-     * The reported miscolour: a line with no live tracking drawn in the live tint
-     * where Moovit draws it plain. futureDepartures holds the real arrival, here a
-     * statistical one, and it must win over the leg's MVTime.
-     */
     @Test
     fun testStatisticalArrivalForTheChosenTripIsNotPaintedAsTracked() {
         val wait = Moovit.Leg(
@@ -72,8 +59,6 @@ class AlternativesRegressionTest {
         assertEquals(listOf(5763348, 8301924), ride.options.map { it.lineId })
         assertEquals(5763348, ride.lineId)
         assertEquals(listOf(4087503675L, 4087534392L), ride.options.map { it.tripId })
-        // each option keeps the plan's own departure time, as a timetable entry:
-        // only an MVArrival can say a departure is tracked
         assertEquals(listOf(1788882235L, 1788882492L),
             ride.options.map { it.nextDeps.first().timeUtc })
         assertEquals(listOf(0L, 0L), ride.options.map { it.nextDeps.first().rtUtc })
@@ -91,12 +76,6 @@ class AlternativesRegressionTest {
             departures[0].map { it.tripId })
         assertEquals(listOf(4087534392L, 4087534393L, 4087534394L, 4087534395L, 4087534396L),
             departures[1].map { it.tripId })
-        // This capture is the reported miscolour. Line 1's chosen trip IS in its
-        // futureDepartures, as a STATISTICAL arrival, no rtEtdUTC, nothing tracking
-        // it, yet the leg's MVTime carries isRealTime, so preferring the MVTime drew
-        // it in the live tint where Moovit draws it plain. The arrival decides now.
-        // Line 0's chosen trip is absent from the list, so it falls back to the plan's
-        // own time and reads as a timetable entry.
         assertEquals(1788882235L, departures[0].first().timeUtc)
         assertEquals(1788882492L, departures[1].first().timeUtc)
         assertEquals(listOf(0L, 0L), departures.map { it.first().rtUtc })
@@ -194,16 +173,6 @@ class AlternativesRegressionTest {
         assertEquals(Moovit.TimeState.REAL_TIME_DROPPED, dep.state)
     }
 
-    /**
-     * The reported miss: Moovit's card said the bus leaves in 4 minutes while Kav
-     * skipped to the one 16 minutes out.
-     *
-     * com.moovit.data.tripplan.realtime.c.b (DefaultItineraryRealTimeRepository)
-     * keeps EVERY live arrival at the leg's line + boarding stop whose pattern
-     * contains the destination stop, sorts them and returns them; there is no floor
-     * at the plan's own departure anywhere in it. Kav floored the live list at the
-     * planned departure, which is exactly the bus Moovit was showing and Kav was not.
-     */
     @Test
     fun testLiveArrivalBeforeThePlannedDepartureIsStillOffered() {
         val live = resolved(
@@ -219,13 +188,6 @@ class AlternativesRegressionTest {
         assertEquals(Moovit.TimeState.REAL_TIME, deps.first().state)
     }
 
-    /**
-     * The same rule stated the other way round: a qualifying live schedule replaces
-     * the plan's schedule outright, early times included. Moovit keeps a journey or a
-     * transfer honest in its PRESENTATION layer instead, mb7 lists schedule.m(now)
-     * and Kav's departLabels/TripDetail already drop anything before now, so the
-     * repository itself never compares a live arrival against the plan.
-     */
     @Test
     fun testLiveScheduleReplacesThePlanWithoutAPlanRelativeFloor() {
         val later = ride().copy(dep = 8200L,
@@ -295,17 +257,6 @@ class AlternativesRegressionTest {
             scheduled.copy(statisticalUtc = 1050L, certainty = 1).state)
     }
 
-    /**
-     * Train 679 was painted as a tracked departure while Kav's own Live screen said
-     * "Line not departed yet". Moovit never presents a trip that has not left its
-     * origin as tracked: both presentation sites test the vehicle status BEFORE they
-     * consult the colour table (`m5e.c` swaps the marker for
-     * mvf_clock_solid_16_surface_inverse_emphasis_medium, and
-     * StopArrivalsActivity$StopArrivalsMetadataType.isNotDepartYetState drives the
-     * DID_NOT_DEPART_YET row and suppresses the live sample time). The estimate still
-     * supplies the time that is SHOWN, Moovit's Time.f() returns rtEtdUTC whenever it
-     * is set, whatever the vehicle is doing, so only the state may change here.
-     */
     @Test
     fun testTripThatHasNotLeftItsOriginIsNotPresentedAsTracked() {
         val started = Moovit.Departure(679L, 1000L, rtUtc = 1100L, certainty = 1)
@@ -315,24 +266,15 @@ class AlternativesRegressionTest {
         val notStarted = started.copy(vehicleStatus = 3)
         assertEquals(Moovit.TimeState.STATIC, notStarted.state)
         assertFalse(notStarted.live)
-        // the tracked estimate is still the time on the card, exactly as Time.f() has it
         assertEquals(1100L, notStarted.timeUtc)
 
-        // a statistical estimate underneath still shows as statistical, not as static
         assertEquals(
             Moovit.TimeState.STATISTICAL,
             notStarted.copy(statisticalUtc = 1050L).state,
         )
-        // and OUT_OF_SHAPE still wins, since Moovit tests it first
         assertEquals(Moovit.TimeState.OUT_OF_SHAPE, notStarted.copy(vehicleStatus = 2).state)
     }
 
-    /**
-     * MVRouteType, value for value. Kav used to fold cable, gondola, funicular and
-     * monorail into TRAM and drop route type 8, the share-taxi network, into OTHER,
-     * so four distinct vehicles drew one mark and a fifth drew a bare circle. Every
-     * value here is one the Israeli MOT feed actually ships.
-     */
     @Test
     fun testEveryRouteTypeInTheFeedGetsItsOwnVehicle() {
         assertEquals(uk.noammm.kav.ui.Mode.TRAM, uk.noammm.kav.ui.modeOf(0))
@@ -343,10 +285,8 @@ class AlternativesRegressionTest {
         assertEquals(uk.noammm.kav.ui.Mode.CABLE, uk.noammm.kav.ui.modeOf(5))
         assertEquals(uk.noammm.kav.ui.Mode.GONDOLA, uk.noammm.kav.ui.modeOf(6))
         assertEquals(uk.noammm.kav.ui.Mode.FUNICULAR, uk.noammm.kav.ui.modeOf(7))
-        // the two the feed ships that Moovit has no vehicle type for
         assertEquals(uk.noammm.kav.ui.Mode.TAXI, uk.noammm.kav.ui.modeOf(8))
         assertEquals(uk.noammm.kav.ui.Mode.TAXI, uk.noammm.kav.ui.modeOf(715))
-        // no two feed types collapse onto one another any more
         val feedTypes = listOf(0, 1, 2, 3, 4, 5, 6, 7)
         assertEquals(feedTypes.size, feedTypes.map { uk.noammm.kav.ui.modeOf(it) }.toSet().size)
     }

@@ -47,11 +47,7 @@ import java.util.Locale
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.haze
 
-/** A persistent map with content-sized step cards and floating navigation controls. */
-
 private val hm = SimpleDateFormat("HH:mm", Locale.US)
-
-/* the steps */
 
 internal sealed class Step {
     abstract val focus: List<Pair<Double, Double>>
@@ -74,7 +70,6 @@ internal sealed class Step {
     class Arrive(val label: String, val time: Long, override val focus: List<Pair<Double, Double>>) : Step()
 }
 
-/** Legs in, pager pages out. A ride becomes two pages, the wait, then the ride. */
 internal fun buildSteps(trip: Moovit.Itinerary, fromLabel: String, toLabel: String): List<Step> {
     val all = trip.legs
     val whole = all.flatMap { it.shape }
@@ -84,7 +79,6 @@ internal fun buildSteps(trip: Moovit.Itinerary, fromLabel: String, toLabel: Stri
     all.forEachIndexed { i, l ->
         when (l.kind) {
             Moovit.LegKind.WALK -> {
-                // a street walk and the walk inside the station are one walk to a rider
                 val prev = all.getOrNull(i - 1)
                 if (prev?.kind == Moovit.LegKind.WALK) return@forEachIndexed
                 var mins = 0; var metres = 0; var j = i
@@ -97,8 +91,6 @@ internal fun buildSteps(trip: Moovit.Itinerary, fromLabel: String, toLabel: Stri
                     fromStop = l.fromStop, toStop = all[j - 1].toStop,
                     meters = metres, shape = all.subList(i, j).flatMap { it.shape },
                 )
-                // A walk ends at the stop you board at, so it is marked with the mode
-                // of the vehicle waiting there, the wait leg in between is not one.
                 val boards = all.drop(j).firstOrNull { it.kind != Moovit.LegKind.WAIT }
                     ?.takeIf { it.kind == Moovit.LegKind.RIDE }
                 out.add(Step.Walk(merged, merged.toStop, boards, merged.shape.ifEmpty { whole }))
@@ -119,11 +111,6 @@ internal fun buildSteps(trip: Moovit.Itinerary, fromLabel: String, toLabel: Stri
     return out
 }
 
-/**
- * Which of a wait leg's alternative lines the rider is navigating with, the plan's
- * own first option until they pick another. A leg that offers only one line has
- * nothing to choose, so this always resolves to something.
- */
 internal fun boardingChoice(
     ride: Moovit.Leg,
     wait: Moovit.Leg?,
@@ -133,7 +120,6 @@ internal fun boardingChoice(
     return options.getOrNull(pick) ?: options.first()
 }
 
-/** The itinerary's legs with each ride replaced by the line the rider chose. */
 private fun chosenLegs(trip: Moovit.Itinerary, chosen: Map<Int, Int>): List<Moovit.Leg> =
     trip.legs.mapIndexed { i, l ->
         if (l.kind != Moovit.LegKind.RIDE) l else boardingChoice(
@@ -141,9 +127,6 @@ private fun chosenLegs(trip: Moovit.Itinerary, chosen: Map<Int, Int>): List<Moov
         ).first
     }
 
-/* the screen */
-
-/** Primary action for the selected trip. */
 @Composable
 fun StartButton(onClick: () -> Unit) {
     Row(
@@ -181,10 +164,6 @@ fun NavigateScreen(
         while (true) { kotlinx.coroutines.delay(1000); value = System.currentTimeMillis() / 1000 }
     }
     val steps = remember(trip, fromLabel, toLabel) { buildSteps(trip, fromLabel, toLabel) }
-    // The line the rider is actually taking, per ride leg. A plan that offers 282, 37
-    // and 471 for one boarding is three journeys, not one, and which of them you are
-    // on decides the arrival times, the stop list and the route on the map. It lives
-    // on the journey, so Home and the small window see the same choice.
     val journey = model.activeJourney?.takeIf { it.trip === trip }
     val chosen: Map<Int, Int> = journey?.chosen ?: emptyMap()
     fun choose(leg: Int, option: Int) {
@@ -192,20 +171,10 @@ fun NavigateScreen(
     }
     val here = model.here
     val fix = model.fix
-    // The step the journey is on, the clock, the vehicle and the phone decide, and
-    // the cards follow it. Swiping is reading ahead; the map goes with the card shown.
     val currentStep = model.journeyStep.coerceIn(0, steps.lastIndex)
     val pager = rememberPagerState(initialPage = currentStep) { steps.size }
     LaunchedEffect(currentStep) { pager.animateScrollToPage(currentStep) }
-    // Start is a "leave at…" placeholder, not a step anyone travels, and it only stays
-    // live while the rider is still within 60 m of where the first step begins. So the
-    // card after it is what they are actually doing, walking off, and the map follows
-    // that one too, rather than making them cover 60 m before it comes alive. Nothing
-    // can be disrupted by following early here: there is no ride under way to leap over.
     val following = pager.settledPage == currentStep ||
-        // an auto-advance in flight: while the card is still sliding into place the
-        // settled page is the old step, and without this the camera fell out of its
-        // windscreen to the overview for that half second, then yanked back in
         pager.targetPage == currentStep ||
         (steps.getOrNull(currentStep) is Step.Start && pager.settledPage == currentStep + 1)
     val scope = rememberCoroutineScope()
@@ -244,7 +213,6 @@ fun NavigateScreen(
                         Text("${dur((trip.arr - now).toInt().coerceAtLeast(0))} · ${hm.format(Date(trip.arr * 1000))}",
                             fontSize = 12.sp, color = K.muted, maxLines = 1)
                     }
-                    // the plan you read before starting, still reachable mid-trip
                     Box(
                         Modifier.size(48.dp).clip(RoundedCornerShape(24.dp))
                             .semantics { contentDescription = T("Show trip plan", "הצגת המסלול") }
@@ -306,7 +274,6 @@ fun NavigateScreen(
     }
 }
 
-/** ‹ · · • · · › , one dot per step, the live one in the accent, and the arrows Moovit puts either side. */
 @Composable
 private fun StepStrip(current: Int, count: Int, live: Int, goTo: (Int) -> Unit) {
     Row(
@@ -356,8 +323,6 @@ private fun Arrow(back: Boolean, enabled: Boolean, onClick: () -> Unit) {
     }
 }
 
-/* the cards */
-
 @Composable
 internal fun StepCard(
     step: Step,
@@ -386,7 +351,11 @@ internal fun StepCard(
                 active,
                 trailing = if (step.leg.meters > 0) distanceLabel(step.leg.meters.toDouble()) else null,
             ) {
-                StopLine(stop?.name ?: T("your stop", "התחנה שלכם"), stop?.code, step.toRide?.let { legMode(it, r) })
+                StopLine(
+                    stop?.name ?: T("your stop", "התחנה שלכם"), stop?.code,
+                    step.toRide?.let { legMode(it, r) },
+                    platform = step.toRide?.let { r.platform(it) }.orEmpty(),
+                )
             }
         }
 
@@ -408,11 +377,6 @@ internal fun StepCard(
                     if (index > 0) Spacer(Modifier.height(K.gap2))
                     val picked = index == pick
                     Column(
-                        // The clip belongs to the selectable plate, not to the option
-                        // itself: with a single line there is no plate, nothing is
-                        // padded off the edge, and a bare rControl arc would run
-                        // straight through the first and last child - slicing the
-                        // line badge's top corners and the alert row's bottom ones.
                         Modifier.fillMaxWidth()
                             .then(
                                 if (options.size > 1) Modifier
@@ -433,6 +397,11 @@ internal fun StepCard(
                     ) {
                         LineRow(ride, r)
                         Spacer(Modifier.height(K.gap2))
+                        val platform = r.platform(ride, wait)
+                        if (platform.isNotBlank()) {
+                            PlatformTag(platform)
+                            Spacer(Modifier.height(K.gap2))
+                        }
                         DepartureTimes(r.departures(ride, wait), now)
                         wait?.let {
                             AlertRow(it.alertCategory, it.alertText, r.line(ride.lineId)?.groupId ?: 0)
@@ -443,7 +412,6 @@ internal fun StepCard(
         }
 
         is Step.Ride -> {
-            // The line the rider chose on the wait page before this one.
             val (ride, _) = boardingChoice(step.ride, step.wait, chosen[step.legIndex] ?: 0)
             val stops = ride.stops
             val names = r.stops + rememberStopNames(stops)
@@ -468,14 +436,8 @@ internal fun StepCard(
     }
 }
 
-/**
- * A stop the rider has to find. The plan screen already marks one with a station
- * plate the way Moovit does; without it a name like "דרך הציונות/בזלת" was bare text
- * in a card whose every other row carried a mark, and read as part of the sentence
- * above it rather than as the place you are walking to.
- */
 @Composable
-private fun StopLine(name: String, code: String?, mode: Mode?) {
+private fun StopLine(name: String, code: String?, mode: Mode?, platform: String = "") {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         if (mode != null) {
             StationMark(mode, 17.dp)
@@ -484,11 +446,14 @@ private fun StopLine(name: String, code: String?, mode: Mode?) {
         Column(Modifier.weight(1f)) {
             Text(name, fontSize = 15.sp, color = K.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (!code.isNullOrBlank()) Text(T("Stop ", "תחנה ") + code, fontSize = 12.sp, color = K.dim)
+            if (platform.isNotBlank()) {
+                Spacer(Modifier.height(K.gap1))
+                PlatformTag(platform)
+            }
         }
     }
 }
 
-/** The plan as a rail of stops, the shape the detail screen draws at full size. */
 @Composable
 private fun PlanGlyph() {
     Canvas(Modifier.size(18.dp)) {
@@ -502,15 +467,6 @@ private fun PlanGlyph() {
     }
 }
 
-/**
- * The stops of a ride, each a circle on the line's rail, and the road already
- * ridden greyed out. [progress] is continuous, in stops: its whole part is how many
- * circles are behind, its fraction how much of the rung to the next circle the ride
- * has covered — so the grey creeps down the rail with the ground, the way the route
- * greys on the map, instead of flipping a rung whole on arrival at its stop. Below
- * zero, nobody knows yet. Rows report where their circles sit; the canvas behind
- * them draws the rail through those points.
- */
 @Composable
 private fun StopRail(
     stops: List<Int>,
@@ -529,7 +485,6 @@ private fun StopRail(
                 val y0 = centres.getOrElse(i) { Float.NaN }
                 val y1 = centres.getOrElse(i + 1) { Float.NaN }
                 if (y0.isNaN() || y1.isNaN() || y1 <= y0) continue
-                // this rung greys from its top, exactly as far as the ride has come
                 val f = (progress - (i + 1)).coerceIn(0f, 1f)
                 val split = y0 + (y1 - y0) * f
                 if (f > 0f) drawLine(K.routeIdle, Offset(x, y0), Offset(x, split), wide)
@@ -539,8 +494,6 @@ private fun StopRail(
                 val cy = centres.getOrElse(i) { Float.NaN }
                 if (cy.isNaN()) return@forEachIndexed
                 val done = progress >= i + 1
-                // the circle: hollow for a stop still ahead, filled once passed,
-                // and larger at the two ends of the ride
                 val rad = if (i == 0 || i == stops.lastIndex) 5.dp.toPx() else 3.5.dp.toPx()
                 drawCircle(K.bg, rad + 2.dp.toPx(), Offset(x, cy))
                 if (done) drawCircle(K.routeIdle, rad, Offset(x, cy))
@@ -579,20 +532,21 @@ private fun LineRow(ride: Moovit.Leg, r: Moovit.Resolved) {
     val info = r.line(ride.lineId)
     val agency = info?.agencyId ?: -1
     val rt = if (info != null) r.routeType(agency) else 3
+    val plate = plateFor(rt, agency)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(
-            Modifier.width(IntrinsicSize.Min).clip(RoundedCornerShape(7.dp)).background(K.plate)
-                .border(1.dp, K.borderStrong, RoundedCornerShape(7.dp)),
+            Modifier.width(IntrinsicSize.Min).clip(RoundedCornerShape(7.dp)).background(plate?.fill ?: K.plate)
+                .border(1.dp, plate?.edge ?: K.borderStrong, RoundedCornerShape(7.dp)),
         ) {
             Row(
                 Modifier.padding(start = 6.dp, end = 8.dp, top = 3.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AgencyMark(rt, agency, K.muted, 15.dp)
+                AgencyMark(rt, agency, plate?.ink ?: K.muted, 15.dp)
                 Spacer(Modifier.width(5.dp))
                 Text(
                     ride.shortName.ifBlank { null } ?: info?.number?.ifBlank { null } ?: "#${ride.lineId}",
-                    fontSize = 16.sp, color = K.text, fontWeight = FontWeight.Medium,
+                    fontSize = 16.sp, color = plate?.ink ?: K.text, fontWeight = FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 120.dp),
                 )
             }
@@ -606,7 +560,6 @@ private fun LineRow(ride: Moovit.Leg, r: Moovit.Resolved) {
     }
 }
 
-/** The body wraps short instructions and scrolls only when it exceeds the available space. */
 @Composable
 private fun Card(
     header: String,
@@ -640,20 +593,6 @@ private fun Card(
     }
 }
 
-/* the map */
-
-/**
- * The camera for the card on screen. A ride, and a walk the rider is actually on, are
- * seen from where they are, facing the way they are going: the compass for a walk, the
- * road for a ride. Every other card frames its own ground and stays north-up.
- *
- * While riding, the vehicle leads when it is reporting where it is: it is on the road
- * the map is drawing, its fix is the operator's rather than a phone in a pocket on a
- * bus, and it is the thing the rider is looking for. The phone stands in only for a
- * vehicle that is not tracked. On a walk the phone is the only thing there is, and a
- * fix a few minutes old still says where the walk is better than the whole step does,
- * a trip resumed after a pause used to lose its camera to that.
- */
 private const val CAMERA_FIX_S = 15 * 60L
 
 private fun followFor(
@@ -664,20 +603,6 @@ private fun followFor(
     return when (step) {
         is Step.Walk -> {
             val at = recent ?: return null
-            // A windscreen is only worth having once the rider is on the walk — off
-            // it, z19 on the phone frames a street they are not walking and pushes
-            // the path they asked about off the screen. So the camera declines, and
-            // the fit frames the walk itself. onWalkNow is the whole judgment: on
-            // the walk's path, or standing at its start — the fixes that just ended
-            // a ride land across the junction from the walk's own polyline more
-            // often than on it — and a camera that engaged holds its grip through
-            // urban scatter instead of flapping in and out around the engage line.
-            //
-            // Two problems that gate is deliberately NOT curing, both of which have
-            // cost it its life once already: reading ahead is `following`'s to
-            // refuse, and the premature card jump is journeyProgress's, which never
-            // advances over a ride still under way. Neither is a reason to follow a
-            // rider who is 400 m from the walk. Leave the distances to decide.
             val path = step.leg.shape
             if (!onWalkNow(at.lat, at.lon, path, heldWalk)) return null
             val along = bearingAlong(at.lat, at.lon, path)
@@ -711,34 +636,30 @@ private fun NavigateMap(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
-    // Draw the journey the rider chose, not the plan's first option.
     val picked = chosenLegs(trip, chosen)
     val legs = picked.filter { it.shape.size >= 2 }
     if (legs.isEmpty()) return
     val pulse = rememberLivePulse()
     val rideLegs = picked.filter { it.kind == Moovit.LegKind.RIDE }
     val rideLegsShapes = legs.filter { it.kind != Moovit.LegKind.WALK }
+    val tints = routeTints(rideLegsShapes, r)
     val fetched = rememberLineRoutes(rideLegs.map { r.arrival(it)?.tripShapeId ?: -1 })
     val lineRoutes = rideLegs
         .map { l ->
             val a = r.arrival(l)
             val route = lineRoute(a, r).ifEmpty { fetched[a?.tripShapeId ?: -1].orEmpty() }
-            // The grey is the line's own journey, but only up to where you get off:
-            // where it carries on afterwards is the bus's business, not the trip's.
             val off = l.shape.lastOrNull() ?: r.stop(l.toStop)?.point
             if (route.size < 2 || off == null) route
             else splitPath(route, off.first, off.second).first
         }
         .filter { it.size >= 2 }
     val vehicles = rideLegs.mapNotNull { r.arrival(it)?.takeIf { a -> a.hasLocation } }
-    // An arrival says where a vehicle is, not what kind it is; its leg's agency does.
     val vehicleModes = remember(rideLegs, r) {
         rideLegs.mapNotNull { leg ->
             r.arrival(leg)?.takeIf { it.hasLocation }
                 ?.let { it.tripId to modeOf(r.routeType(r.line(leg.lineId)?.agencyId ?: -1)) }
         }.toMap()
     }
-    // every stop on every ride, so the map shows the same circles the card does
     val stopNames = rememberStopNames(remember(rideLegs) { rideLegs.flatMap { it.stops } })
     val stopPoints = remember(rideLegsShapes, r.stops, stopNames) {
         rideStopPoints(rideLegsShapes, r.stops + stopNames)
@@ -753,6 +674,7 @@ private fun NavigateMap(
     val chosenFocus = when (step) {
         is Step.Wait -> chosenRide?.shape?.take(1)
         is Step.Ride -> chosenRide?.shape
+        is Step.Arrive -> step.focus.takeLast(1)
         else -> null
     }.orEmpty()
     val focus = chosenFocus.ifEmpty { step?.focus.orEmpty() }
@@ -760,20 +682,11 @@ private fun NavigateMap(
     val framedPoints = focus + listOfNotNull(focusedVehicle?.let { it.lat to it.lon })
     val mePulse = animateFloatAsState(if (here == null) 0f else 1f, tween(350), label = "meReveal")
     val vehicleAlpha = animateFloatAsState(if (vehicles.isEmpty()) 0f else 1f, tween(350), label = "vehicleReveal")
-    // Following is for the step being ridden. Swipe to another card and the map stops
-    // being a windscreen and becomes a plan of that step: a transfer walk read from the
-    // bus frames the path between the two stops, which is the thing being asked about,
-    // instead of a close-up of a rider who is still three stops away from it.
-    // The walk camera's grip, per card: engaged by onWalkNow's gate inside followFor,
-    // and once held it survives fixes that stray as far as OFF_WALK_M. Keyed on the
-    // step so the grip drops the moment the card changes.
     val heldWalk = remember(step) { mutableStateOf(false) }
     val follow = if (following) followFor(step, chosenRide, r, fix, heading, now, heldWalk.value) else null
     SideEffect { heldWalk.value = follow != null && step is Step.Walk }
     val fresh = fix?.takeIf { it.isFresh(now) }
 
-    // The part of the current ride already behind you goes grey, from wherever the
-    // vehicle is, or you are, when it is not tracked, along its route.
     val ridingLeg = (step as? Step.Ride)?.let { chosenRide }
     val behind = remember(ridingLeg, fresh?.lat, fresh?.lon, focusedVehicle?.lat, focusedVehicle?.lon, step) {
         val shape = ridingLeg?.shape ?: return@remember emptyList<Pair<Double, Double>>()
@@ -786,23 +699,17 @@ private fun NavigateMap(
         splitPath(shape, at.first, at.second).first
     }
 
-    // The route, the stops and the ends go to MapLibre itself: drawn in the same GL
-    // frame as the ground, they cannot slide against it while the camera is easing.
     val walkLegs = legs.filter { it.kind == Moovit.LegKind.WALK }
-    val geometry = remember(lineRoutes, legs, behind, stopPoints, K.accent) {
+    val geometry = remember(lineRoutes, legs, behind, stopPoints, tints) {
         MapGeometry(
             lines = lineRoutes.map { MapLine(it, K.routeIdle, 3f, casing = 6f) } +
                 walkLegs.map { MapLine(it.shape, K.muted, 2f, dashed = true) } +
-                rideLegsShapes.mapIndexed { i, l -> MapLine(l.shape, routeTint(i), 4f, casing = 8f) } +
+                rideLegsShapes.mapIndexed { i, l -> MapLine(l.shape, tints[i], 4f, casing = 8f) } +
                 listOf(MapLine(behind, K.routeIdle, 4f, casing = 8f)),
-            // The stops the bus only calls at wear the colour of the ride that calls at
-            // them, so a leg is one colour from end to end instead of a coloured line
-            // threaded through neutral beads. Size still separates them from the two
-            // that matter: these stay small and hollow, a boarding is filled.
             dots = stopPoints.flatMap { (ride, at) ->
                 val (lat, lon) = at
-                listOf(MapDot(lat, lon, K.bg, 6f), MapDot(lat, lon, Color.Transparent, 3.5f, routeTint(ride), 2f))
-            } + boardingMarkers(rideLegsShapes, r, r.stops + stopNames) + listOfNotNull(
+                listOf(MapDot(lat, lon, K.bg, 6f), MapDot(lat, lon, Color.Transparent, 3.5f, tints[ride], 2f))
+            } + boardingMarkers(rideLegsShapes, tints, r, r.stops + stopNames) + listOfNotNull(
                 legs.first().shape.firstOrNull()?.let { (lat, lon) -> MapDot(lat, lon, K.bg, 7f) },
                 legs.first().shape.firstOrNull()?.let { (lat, lon) -> MapDot(lat, lon, Color.Transparent, 5f, K.text, 2f) },
                 legs.last().shape.lastOrNull()?.let { (lat, lon) -> MapDot(lat, lon, K.bg, 8f) },
@@ -811,14 +718,6 @@ private fun NavigateMap(
         )
     }
 
-    // You and the buses are ground-locked, so they render as GL layers with the map,
-    // on the Compose canvas they lag the ground by a frame and slide during gestures.
-    // Only the pulse ring stays on the canvas: its radius animates every frame, and a
-    // diffuse ring can tolerate the one-frame slide the crisp markers cannot.
-    // The compass arrow is a walking instrument: it claims the rider is facing along
-    // this walk. That is only true when the walk camera has engaged, so it rides on
-    // exactly that: a card read ahead, or one whose walk is still streets away, gets
-    // the plain "you are here" dot back instead.
     val walkArrow = follow != null && step is Step.Walk && heading != null
     val live = MapGeometry(
         dots = buildList {
@@ -837,7 +736,6 @@ private fun NavigateMap(
         },
         markers = (
             if (walkArrow) here?.let { (lat, lon) ->
-                // the compass arrow: which way you are facing, on the ground
                 listOf(MapMarker(lat, lon, MAP_ARROW_ICON, heading ?: 0f, mePulse.value))
             }.orEmpty() else emptyList()
         ) + vehicles.map { v ->
@@ -846,6 +744,7 @@ private fun NavigateMap(
     )
 
     TileMap(framedPoints, modifier, focusKey = step to chosenRide?.tripId,
+        fitMaxZoom = if (step is Step.Walk || step is Step.Arrive) 18.4f else Geo.MAX_Z.toFloat(),
         recenterOn = here, contentPadding = contentPadding, follow = follow,
         geometry = geometry, live = live,
         animatedOverlay = { proj ->
@@ -858,17 +757,9 @@ private fun NavigateMap(
     )
 }
 
-/**
- * Stops use their actual coordinates; route endpoints remain usable while names load.
- * Each point comes back tagged with the position of its ride in [legs], because that is
- * what gives it [routeTint]'s colour, and the index has to be taken from the same list
- * the lines were drawn from or a stop is painted a different colour from the line it
- * sits on.
- */
 internal fun rideStopPoints(legs: List<Moovit.Leg>, stops: Map<Int, Moovit.StopInfo>): List<Pair<Int, Pair<Double, Double>>> =
     legs.indices.flatMap { i ->
         val leg = legs[i]
-        // onto the line this leg actually draws, or every circle floats beside it
         (leg.stops.mapNotNull { stops[it]?.point }.map { onRoute(it, leg.shape) } + listOfNotNull(
             leg.shape.firstOrNull().takeIf { stops[leg.fromStop]?.point == null && stops[leg.stops.firstOrNull()]?.point == null },
             leg.shape.lastOrNull().takeIf { stops[leg.toStop]?.point == null && stops[leg.stops.lastOrNull()]?.point == null },

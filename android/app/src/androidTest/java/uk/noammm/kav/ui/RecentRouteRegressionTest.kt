@@ -9,11 +9,6 @@ import uk.noammm.kav.Prefs
 import uk.noammm.kav.RecentTrip
 import uk.noammm.kav.data.Moovit
 
-/**
- * A recent trip reopens the route it was taken by, not whatever today's plan ranks
- * first. These pin the two halves of that: recognising the route in a fresh plan, and
- * surviving the trip round trip through storage.
- */
 @RunWith(AndroidJUnit4::class)
 class RecentRouteRegressionTest {
     private fun ride(lineId: Int, vararg alternatives: Int) = Moovit.Leg(
@@ -41,7 +36,6 @@ class RecentRouteRegressionTest {
 
     @Test
     fun testALegOfferingAChoiceOfLinesMatchesOnEither() {
-        // "472 / 473": the server can promote either one between plans
         val today = itinerary(2, walk, ride(473, 472), walk)
         assertTrue(sameRoute(today, taken(2, 472)))
         assertTrue(sameRoute(today, taken(2, 473)))
@@ -71,7 +65,6 @@ class RecentRouteRegressionTest {
         assertFalse(sameRoute(itinerary(2), old))
     }
 
-    // The test app's own context, so the phone's real recent trips are left alone.
     private val ctx get() = InstrumentationRegistry.getInstrumentation().context
 
     @Test
@@ -84,11 +77,9 @@ class RecentRouteRegressionTest {
         assertEquals(2, back.group)
         assertTrue(sameRoute(trip, back))
 
-        // taking the same trip by another route replaces the one remembered
         Prefs.rememberTrip(ctx, null, to, 1_757_000_100_000L, itinerary(2, ride(66)))
         assertEquals(listOf(66), Prefs.trips(ctx).first().lines)
 
-        // and choosing a route from the list updates that entry without adding one
         val before = Prefs.trips(ctx).size
         Prefs.noteTripRoute(ctx, null, to, trip)
         assertEquals(before, Prefs.trips(ctx).size)

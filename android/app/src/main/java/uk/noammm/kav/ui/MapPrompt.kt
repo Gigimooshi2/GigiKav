@@ -17,13 +17,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import uk.noammm.kav.data.MapFile
 
-/**
- * The offer to download the map, shown at launch while the archive is not here:
- * the first launch after updating from a Kav that drew its map online, and any
- * launch after the file has gone missing. A fresh install never reaches it, because
- * setup does not finish until the map is down. Saying Later closes it until the next
- * launch; the map pane keeps making the same offer meanwhile.
- */
 @Composable
 fun MapPrompt() {
     var dismissed by remember { mutableStateOf(false) }

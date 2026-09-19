@@ -71,43 +71,8 @@ import kotlin.math.sin
 import kotlin.math.sinh
 import kotlin.math.tan
 
-/**
- * A basemap under the route: pinch to zoom, drag to pan, twist to turn.
- *
- * The map is rendered by MapLibre from a PMTiles archive of Israel that lives on the
- * phone (data/MapFile.kt), vector, so it stays crisp at every zoom, and offline, so
- * nothing about where you look leaves the device. The style is Protomaps' "black"
- * flavour, bundled with its fonts and sprites in the APK.
- *
- * MapLibre here is only a renderer. The camera, fit, pan, pinch, follow, the lean,
- * is Kav's own, exactly as it was over raster tiles: gestures land on a Compose layer
- * above the map and MapLibre's camera is driven to follow [MapCamera]. Overlay
- * geometry is drawn on Compose canvases with the same linear [MapProjection]; the two
- * agree because MapLibre is given the same centre, scale and rotation pivot (its
- * camera padding puts the focal point on [Viewport.anchor]).
- *
- * Camera position and zoom survive location polls. Explicit focus changes animate a
- * fit; a moving point only expands the view once it leaves the visible area.
- *
- * Given a [Follow], the map turns into the view from the road: the followed point sits
- * low in the frame, the direction of travel is up, and the ground leans away.
- */
-
 const val MAP_ATTRIBUTION = "Protomaps · © OpenStreetMap"
 
-/**
- * Geometry MapLibre draws itself, inside the basemap's own frame.
- *
- * A Compose canvas above the map draws at the camera the animation just asked for;
- * MapLibre renders on its own thread a frame or more later. At rest the two agree,
- * but a follow animation never rests, and the route slides against the streets by
- * however far the camera moved in the gap. Geometry handed to MapLibre is composed
- * with the ground in the same GL frame, so it cannot swim, and the fullscreen
- * per-frame path drawing it replaces was most of the overlay's frame budget.
- *
- * Sizes are dp, converted once when the features are written. Order is list order:
- * dashed lines go down first, then every casing, then every line, then dots.
- */
 data class MapLine(
     val points: List<Pair<Double, Double>>,
     val colour: Color,
@@ -125,7 +90,6 @@ data class MapDot(
     val strokeWidth: Float = 0f,
 )
 
-/** A bitmap marker MapLibre draws on the ground: an icon registered on the style, turned with the map. */
 data class MapMarker(
     val lat: Double,
     val lon: Double,
@@ -137,7 +101,6 @@ data class MapMarker(
 data class MapGeometry(
     val lines: List<MapLine> = emptyList(),
     val dots: List<MapDot> = emptyList(),
-    /** Drawn on the `live` path only; the static `geometry` carries lines and dots. */
     val markers: List<MapMarker> = emptyList(),
 )
 
@@ -146,17 +109,11 @@ private const val SRC_DOTS = "kav-dots"
 private const val SRC_LIVE_DOTS = "kav-live-dots"
 private const val SRC_LIVE_MARKS = "kav-live-marks"
 
-/** The compass arrow's icon name, registered on the style by [TileMap], usable in [MapMarker]. */
 const val MAP_ARROW_ICON = "kav-arrow"
 
-/** The style spec's colour strings; Compose colours carry alpha the same way. */
 private fun rgba(c: Color): String =
     "rgba(${(c.red * 255).toInt()},${(c.green * 255).toInt()},${(c.blue * 255).toInt()},${c.alpha})"
 
-/**
- * Kav's own layers on top of whatever style is loaded, driven per feature: colour,
- * width and order come with the geometry, so one set of layers serves every screen.
- */
 private fun Style.ensureKavLayers() {
     if (getSource(SRC_LINES) != null) return
     addSource(GeoJsonSource(SRC_LINES))
@@ -170,7 +127,6 @@ private fun Style.ensureKavLayers() {
     val join = PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
     addLayer(LineLayer("kav-line-dash", SRC_LINES).withProperties(
         PropertyFactory.lineColor(colour), PropertyFactory.lineWidth(width),
-        // dasharray is in line widths: 3dp on, 5dp off, at the walk hairline's 2dp
         PropertyFactory.lineDasharray(arrayOf(1.5f, 2.5f)),
         PropertyFactory.lineSortKey(sort), round, join,
     ).withFilter(Expression.eq(Expression.get("dashed"), Expression.literal(true))))
@@ -193,10 +149,6 @@ private fun Style.ensureKavLayers() {
         PropertyFactory.circleStrokeWidth(Expression.toNumber(Expression.get("strokeWidth"))),
         PropertyFactory.circleSortKey(sort),
     ))
-    // The live markers, where you are, where the buses are, go above everything.
-    // They are GL layers for the same reason the route is: a Compose canvas draws at
-    // the camera the gesture just asked for, MapLibre presents a frame or more later,
-    // and a marker that must sit on the ground slides against it by the difference.
     addLayer(CircleLayer("kav-live-dot", SRC_LIVE_DOTS).withProperties(
         PropertyFactory.circleColor(colour),
         PropertyFactory.circleRadius(Expression.toNumber(Expression.get("r"))),
@@ -208,14 +160,12 @@ private fun Style.ensureKavLayers() {
         PropertyFactory.iconImage(Expression.get("icon")),
         PropertyFactory.iconRotate(Expression.toNumber(Expression.get("rot"))),
         PropertyFactory.iconOpacity(Expression.toNumber(Expression.get("alpha"))),
-        // the arrow points a compass heading: a bearing over the ground, not the screen
         PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
         PropertyFactory.iconAllowOverlap(true),
         PropertyFactory.iconIgnorePlacement(true),
     ))
 }
 
-/** Style pixels are already density-scaled on Android, so the dp sizes go in as-is. */
 private fun Style.setKavGeometry(g: MapGeometry) {
     val lines = g.lines.filter { it.points.size >= 2 }.mapIndexed { i, l ->
         Feature.fromGeometry(LineString.fromLngLats(l.points.map { Point.fromLngLat(it.second, it.first) })).apply {
@@ -241,7 +191,6 @@ private fun dotFeatures(dots: List<MapDot>): List<Feature> = dots.mapIndexed { i
     }
 }
 
-/** The frequently-moving markers, in their own sources so a GPS tick rewrites two features, not the route. */
 private fun Style.setKavLive(g: MapGeometry) {
     val marks = g.markers.map { m ->
         Feature.fromGeometry(Point.fromLngLat(m.lon, m.lat)).apply {
@@ -254,7 +203,6 @@ private fun Style.setKavLive(g: MapGeometry) {
     getSourceAs<GeoJsonSource>(SRC_LIVE_MARKS)?.setGeoJson(FeatureCollection.fromFeatures(marks))
 }
 
-/** The walk compass arrow, drawn once as a bitmap for the symbol layer: [MAP_ARROW_ICON]. */
 private fun arrowBitmap(dp: Float): android.graphics.Bitmap {
     val s = 11f * dp
     val half = (s * 1.35f + 3f * dp).toInt() + 1
@@ -281,12 +229,9 @@ private fun arrowBitmap(dp: Float): android.graphics.Bitmap {
     return bmp
 }
 
-/** Web-mercator: the 0..1 world square, and the zoom range the camera works in. */
 internal object Geo {
-    /** Zoom is in 256px-tile units, as it always was; MapLibre's 512px zoom is one less. */
     const val SIZE = 256
     const val MIN_Z = 8
-    /** Where a fit stops zooming in; gestures may go [OVER] past it, vector stays sharp. */
     const val MAX_Z = 16
     const val OVER = 6f
     fun x(lon: Double): Double = (lon + 180.0) / 360.0
@@ -298,29 +243,16 @@ internal object Geo {
     fun lat(y: Double): Double = Math.toDegrees(atan(sinh(PI * (1.0 - 2.0 * y))))
 }
 
-/** Where the map is looking. World coordinates are the 0..1 web-mercator square. */
 private data class Camera(val worldX: Double, val worldY: Double, val zoom: Float, val rotation: Float = 0f) {
     val pxPerWorld get() = Geo.SIZE * 2.0.pow(zoom.toDouble())
 }
 
-/** A point to keep low in the frame with [bearing] up, where you are, the way you are going. */
 data class Follow(val lat: Double, val lon: Double, val bearing: Float, val zoom: Float = 18.5f)
 
-/**
- * Where the followed point sits, as fractions of the part of the map nothing covers.
- * It used to be a fraction of the whole canvas, and the whole canvas runs under the
- * step cards: on a tall phone two thirds of the way down was behind the ride card,
- * and the arrow that is the point of following was hidden by the card describing it.
- */
 private const val ANCHOR_X = 0.5f
 private const val ANCHOR_Y = 0.72f
 private const val TILT_DEG = 40f
 
-/**
- * A screen point back into the space the overlays draw in. They are drawn through
- * `rotate(-rotation, anchor)`, so undoing a tap means turning it the other way about
- * the same pivot. A no-op on a map that has not been turned.
- */
 private fun unrotate(at: Offset, anchor: Offset, rotation: Float): Offset {
     if (rotation == 0f) return at
     val rad = Math.toRadians(rotation.toDouble())
@@ -329,7 +261,6 @@ private fun unrotate(at: Offset, anchor: Offset, rotation: Float): Offset {
     return Offset((dx * c - dy * sn + anchor.x).toFloat(), (dx * sn + dy * c + anchor.y).toFloat())
 }
 
-/** What the caller needs to place its own geometry on the map. */
 class MapProjection(
     private val centerWorldX: Double,
     private val centerWorldY: Double,
@@ -364,11 +295,9 @@ private data class Viewport(val left: Float, val top: Float, val right: Float, v
         val y = (point.y - camera.worldY) * camera.pxPerWorld + h / 2
         return x >= left && x <= right && y >= top && y <= bottom
     }
-    /** The followed point's place on screen: low in the uncovered area, never under a card. */
     val anchor get() = Offset(left + width * ANCHOR_X, top + height * ANCHOR_Y)
 }
 
-/** Fits into the unobscured rectangle; projection coordinates still use the whole canvas. */
 private fun fitCamera(points: List<WorldPoint>, viewport: Viewport, padFraction: Float, maxZoom: Float = Geo.MAX_Z.toFloat()): Camera {
     val area = viewport.inset(padFraction)
     val minX = points.minOf { it.x }; val maxX = points.maxOf { it.x }
@@ -395,21 +324,22 @@ private class MapCamera {
     private var previousViewport: Viewport? = null
     private var previousFocus: Any? = null
     private var previousPadding = 0f
+    private var previousMaxZoom = Geo.MAX_Z.toFloat()
 
-    fun update(points: List<WorldPoint>, viewport: Viewport, focus: Any?, padding: Float, scope: CoroutineScope) {
+    fun update(points: List<WorldPoint>, viewport: Viewport, focus: Any?, padding: Float, maxZoom: Float, scope: CoroutineScope) {
         if (points.isEmpty() || viewport.w <= 0 || viewport.h <= 0) return
-        val reframe = value == null || previousFocus != focus || previousViewport != viewport || previousPadding != padding
+        val reframe = value == null || previousFocus != focus || previousViewport != viewport ||
+            previousPadding != padding || previousMaxZoom != maxZoom
         val current = destination ?: value
         val changed = points.filterIndexed { index, point -> previousPoints.getOrNull(index) != point }
         previousPoints = points
         previousFocus = focus
         previousViewport = viewport
         previousPadding = padding
+        previousMaxZoom = maxZoom
         if (reframe) {
-            reset(points, viewport, padding, scope)
+            reset(points, viewport, padding, maxZoom, scope)
         } else if (current != null && changed.any { !viewport.contains(it, current) }) {
-            // Preserve the current visible area, and expand to include the moved points.
-            // Static route points outside a manually panned view do not reset the camera.
             val area = viewport.inset(padding)
             val scale = current.pxPerWorld
             val bounds = listOf(
@@ -420,23 +350,18 @@ private class MapCamera {
         }
     }
 
-    fun reset(points: List<WorldPoint>, viewport: Viewport, padding: Float, scope: CoroutineScope) {
+    fun reset(points: List<WorldPoint>, viewport: Viewport, padding: Float, maxZoom: Float, scope: CoroutineScope) {
         if (points.isEmpty()) return
         manual = false
-        moveTo(fitCamera(points, viewport, padding), scope)
+        moveTo(fitCamera(points, viewport, padding, maxZoom), scope)
     }
 
-    /** Put one point back under the middle of the map, at the zoom already in use. */
     fun centre(point: WorldPoint, scope: CoroutineScope) {
         val current = destination ?: value ?: return
         manual = false
         moveTo(current.copy(worldX = point.x, worldY = point.y, rotation = 0f), scope)
     }
 
-    /**
-     * The followed point goes to the anchor and the bearing goes up. Rotation is about
-     * the anchor, so the point stays put while the world turns around it.
-     */
     fun follow(target: Follow, viewport: Viewport, scope: CoroutineScope) {
         val scale = Geo.SIZE * 2.0.pow(target.zoom.toDouble())
         val tx = Geo.x(target.lon)
@@ -452,14 +377,9 @@ private class MapCamera {
         moveTo(goal, scope, duration = 700)
     }
 
-    /** Back on the rails after a manual pan: the next follow or fit takes over. */
     fun resume() { manual = false }
 
     private fun moveTo(target: Camera, scope: CoroutineScope, duration: Int = 520) {
-        // A jittering compass retargets a follow on every sensor tick, and an ease
-        // restarted every tick lives forever in its slow start, the camera crawls
-        // and never arrives. A target this close to where the camera is already
-        // going is the same place; let the flight that is under way land.
         (destination ?: value)?.let { d ->
             var spin = target.rotation - d.rotation
             if (spin > 180f) spin -= 360f
@@ -477,7 +397,6 @@ private class MapCamera {
             destination = null
             return
         }
-        // turn the short way round
         var spin = target.rotation - start.rotation
         if (spin > 180f) spin -= 360f
         if (spin < -180f) spin += 360f
@@ -502,17 +421,9 @@ private class MapCamera {
         manual = true
         val zoom = (current.zoom + ln(zoomChange.coerceAtLeast(0.01f)) / ln(2f))
             .coerceIn(Geo.MIN_Z.toFloat(), Geo.MAX_Z + Geo.OVER)
-        // The twist turns the drawn world with the fingers. The world is drawn at
-        // -rotation, so the bearing runs against the gesture's clockwise-positive
-        // degrees.
         val rotation = (((current.rotation - twist) % 360f) + 360f) % 360f
         val before = current.pxPerWorld
         val after = Geo.SIZE * 2.0.pow(zoom.toDouble())
-        // Fingers act in screen directions; the drawn world is turned about the
-        // anchor. Undo that turn to find what the fingers are actually holding, or a
-        // pinch on a turned map zooms about a point off to one side and drifts. The
-        // grip is read out under the old turn and put back under the new one, and
-        // that difference is what keeps the streets under the fingers as they twist.
         val anchor = viewport.anchor
         fun flat(s: Offset, degrees: Float): Pair<Double, Double> {
             val rad = Math.toRadians(degrees.toDouble())
@@ -533,11 +444,6 @@ private class MapCamera {
     }
 }
 
-/**
- * Camera padding that puts MapLibre's focal point on [anchor]: left, top, right,
- * bottom. MapLibre centres the target in the padded viewport, so the padded centre
- * must land exactly on the anchor, pinned by GeometryRegressionTest.
- */
 internal fun focalPadding(anchor: Offset, w: Float, h: Float): DoubleArray = doubleArrayOf(
     (2 * anchor.x - w).coerceAtLeast(0f).toDouble(),
     (2 * anchor.y - h).coerceAtLeast(0f).toDouble(),
@@ -545,21 +451,13 @@ internal fun focalPadding(anchor: Offset, w: Float, h: Float): DoubleArray = dou
     (h - 2 * anchor.y).coerceAtLeast(0f).toDouble(),
 )
 
-
-/** MapLibre's camera, told to look exactly where [Camera] is looking. */
 private fun MapLibreMap.driveTo(cam: Camera, anchor: Offset, w: Float, h: Float, pitch: Float, screenDensity: Float) {
-    // The anchor becomes MapLibre's focal point via camera padding, so bearing and
-    // tilt pivot where the overlay's turned{} pivots.
     val wx = cam.worldX + (anchor.x - w / 2) / cam.pxPerWorld
     val wy = cam.worldY + (anchor.y - h / 2) / cam.pxPerWorld
     val pad = focalPadding(anchor, w, h)
     moveCamera(CameraUpdateFactory.newCameraPosition(
         CameraPosition.Builder()
             .target(LatLng(Geo.lat(wy), Geo.lon(wx)))
-            // 256px-tile zoom → MapLibre's 512px zoom, minus log2(density): MapLibre's
-            // zoom is defined against density-independent pixels while Camera works in
-            // screen pixels, and without this every fit, pan and pinch lands density×
-            // off even though the anchor (the pivot, immune to scale) registers.
             .zoom(cam.zoom.toDouble() - 1.0 - ln(screenDensity.toDouble()) / ln(2.0))
             .bearing(cam.rotation.toDouble())
             .tilt(pitch.toDouble())
@@ -573,31 +471,15 @@ fun TileMap(
     points: List<Pair<Double, Double>>,
     modifier: Modifier = Modifier,
     padFraction: Float = 0.10f,
+    fitMaxZoom: Float = Geo.MAX_Z.toFloat(),
     focusKey: Any? = Unit,
-    /**
-     * What the reset control goes back to. Framing the whole route is right on a map
-     * you are reading; while you are being navigated it is not, you want to be put
-     * back on yourself, not on the end of the journey.
-     */
     recenterOn: Pair<Double, Double>? = null,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     follow: Follow? = null,
     geometry: MapGeometry? = null,
-    /**
-     * Ground-locked markers that move often, you, the buses. Drawn by MapLibre in the
-     * same GL frame as the ground, because a Compose overlay lags the map by a frame or
-     * more and anything that must sit on the ground visibly slides during pans and
-     * pinches. Use [animatedOverlay] only for effects that tolerate that slide.
-     */
     live: MapGeometry? = null,
     animatedOverlay: DrawScope.(MapProjection) -> Unit = {},
     overlay: DrawScope.(MapProjection) -> Unit = {},
-    /**
-     * A tap on the ground, given in the same coordinates the overlays draw in: a
-     * caller that placed a marker with [MapProjection.point] can compare the two and
-     * decide whether the tap landed on it. Flat projection, like the overlays, so it
-     * means nothing while the map is leaning.
-     */
     onTap: ((Offset, MapProjection) -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
@@ -611,19 +493,12 @@ fun TileMap(
         }
     }
     val following = follow != null && !camera.manual
-    // The lean is MapLibre's own pitch: the GPU draws the tilted ground across the
-    // whole viewport and fetches the far field at coarser zoom, where a flat frame
-    // tilted after the fact runs out of pixels short of the horizon. Leaning in is
-    // slow and cinematic; flattening is quick, because the gesture math reads the
-    // screen as flat and should not be wrong for longer than it takes to get there.
     val tilt by animateFloatAsState(if (following) TILT_DEG else 0f,
         tween(if (following) 600 else 280, easing = FastOutSlowInEasing), label = "tilt")
 
     val mapView = remember {
         MapLibre.getInstance(ctx.applicationContext)
         MapView(ctx, MapLibreMapOptions.createFromAttributes(ctx)
-            // TextureView, not SurfaceView: the map composes like any other layer,
-            // so panes above it and clipped corners behave without surface holes.
             .textureMode(true)
             .compassEnabled(false).logoEnabled(false).attributionEnabled(false)
             .foregroundLoadColor(K.surface1.toArgb()))
@@ -644,7 +519,6 @@ fun TileMap(
         }
         lifecycle.addObserver(observer)
         mapView.getMapAsync { m ->
-            // Kav's own gestures drive the camera; MapLibre must not fight them.
             m.uiSettings.setAllGesturesEnabled(false)
             val densityShift = ln(ctx.resources.displayMetrics.density.toDouble()) / ln(2.0)
             m.setMinZoomPreference(Geo.MIN_Z - 1.0 - densityShift)
@@ -667,8 +541,6 @@ fun TileMap(
     fun Style.ensureKavIcons() {
         val px = with(density) { 1.dp.toPx() }
         if (getImage(MAP_ARROW_ICON) == null) addImage(MAP_ARROW_ICON, arrowBitmap(px))
-        // one vehicle mark per mode: a train on the map is the train Moovit draws,
-        // not a bus standing in for everything that is not a bus
         val span = (12f * px).toInt().coerceAtLeast(8)
         for (m in Mode.entries) {
             val name = modeIconName(m)
@@ -699,18 +571,14 @@ fun TileMap(
         val padT = with(density) { contentPadding.calculateTopPadding().toPx() }.coerceIn(0f, (h - 1).coerceAtLeast(0f))
         val padR = with(density) { contentPadding.calculateRightPadding(layoutDirection).toPx() }
         val padB = with(density) { contentPadding.calculateBottomPadding().toPx() }
-        // what the cards leave uncovered
         val viewport = Viewport(padL, padT,
             (w - padR).coerceAtLeast(padL + 1),
             (h - padB).coerceAtLeast(padT + 1), w, h)
         val liveViewport by rememberUpdatedState(viewport)
 
-        LaunchedEffect(worldPoints, viewport, focusKey, padFraction, follow == null) {
-            if (follow == null) camera.update(worldPoints, viewport, focusKey, padFraction, scope)
+        LaunchedEffect(worldPoints, viewport, focusKey, padFraction, fitMaxZoom, follow == null) {
+            if (follow == null) camera.update(worldPoints, viewport, focusKey, padFraction, fitMaxZoom, scope)
         }
-        // Moving to a new step card is an explicit "take me there": it ends a manual
-        // pan, so the camera re-engages, the follow for that step, or its fit,
-        // instead of staying wherever the fingers left it.
         LaunchedEffect(focusKey) { camera.resume() }
         LaunchedEffect(follow, viewport, camera.manual) {
             if (follow != null && !camera.manual) camera.follow(follow, viewport, scope)
@@ -723,11 +591,6 @@ fun TileMap(
                 .collect { (cam, pitch) -> m.driveTo(cam, anchor, w, h, pitch, density.density) }
         }
 
-        // Route geometry and the live marker layer draw above the map. Each layer
-        // observes camera changes in draw, without recomposing the map, and turns
-        // with it: MapLibre turns about the same anchor its padding pins. The flat
-        // projection knows nothing of pitch, so the canvases fade out as the map
-        // leans, everything ground-locked lives in GL layers and leans with it.
         fun DrawScope.turned(block: DrawScope.() -> Unit) {
             val current = camera.value ?: return
             rotate(-current.rotation, anchor) { block() }
@@ -737,11 +600,6 @@ fun TileMap(
         val tap by rememberUpdatedState(onTap)
         Canvas(
             Modifier.fillMaxSize().graphicsLayer { alpha = 1f - tilt / TILT_DEG }
-                // The tap detector sits OUTSIDE the transform one, so the transform
-                // gets every event first: a pan past slop is consumed there and never
-                // reaches here, and only a press that went nowhere is read as a tap.
-                // Attached only where a caller wants taps, so the maps that only want
-                // to be panned keep exactly the gesture handling they always had.
                 .then(if (onTap == null) Modifier else Modifier.pointerInput(anchor) {
                     detectTapGestures { at ->
                         val current = camera.value ?: return@detectTapGestures
@@ -753,8 +611,6 @@ fun TileMap(
                     }
                 })
                 .pointerInput(camera) {
-                    // panZoomLock: a pinch that begins as a pinch stays one; only a
-                    // gesture that leads with the turn rotates the map.
                     detectTransformGestures(panZoomLock = true) { centroid, panChange, zoomChange, twist ->
                         camera.gesture(centroid, panChange, zoomChange, twist, liveViewport)
                     }
@@ -789,7 +645,7 @@ fun TileMap(
                         when {
                             follow != null -> camera.resume()
                             me != null -> camera.centre(WorldPoint(Geo.x(me.second), Geo.y(me.first)), scope)
-                            else -> camera.reset(worldPoints, viewport, padFraction, scope)
+                            else -> camera.reset(worldPoints, viewport, padFraction, fitMaxZoom, scope)
                         }
                     }
                     .padding(horizontal = 10.dp, vertical = 5.dp),
@@ -806,7 +662,6 @@ fun TileMap(
     }
 }
 
-/** The offer, in the space the map would fill: the ground under Kav, fetched once. */
 @Composable
 private fun MapDownloadCard(modifier: Modifier) {
     val ctx = LocalContext.current

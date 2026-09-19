@@ -2,21 +2,12 @@ package uk.noammm.kav.data
 
 import java.io.ByteArrayOutputStream
 
-/**
- * Apache Thrift TBinaryProtocol, the wire format of Moovit's mobile API.
- * Bodies are BARE structs (no RPC envelope), so this is just field read/write,
- * big-endian, fixed width, proven end to end against the live API.
- *
- * TType bytes: bool=2 byte=3 double=4 i16=6 i32=8 i64=10 string=11 struct=12
- *              map=13 set=14 list=15
- */
 object TType {
     const val STOP = 0; const val BOOL = 2; const val BYTE = 3; const val DOUBLE = 4
     const val I16 = 6; const val I32 = 8; const val I64 = 10; const val STRING = 11
     const val STRUCT = 12; const val MAP = 13; const val SET = 14; const val LIST = 15
 }
 
-/** Writer. */
 class TWriter {
     private val b = ByteArrayOutputStream(256)
     fun bytes(): ByteArray = b.toByteArray()
@@ -44,13 +35,9 @@ class TWriter {
     }
 }
 
-/** Reader → nested maps/lists, keyed by field id. Values: Boolean/Int/Long/String,
- *  Map<Int,Any?> for structs, List<Any?> for lists. */
 class TReader(private val d: ByteArray) {
     private var p = 0
 
-    /** Responses that cover several entities are concatenated BARE structs, so a
-     *  caller has to keep reading until the buffer runs out. */
     fun hasMore(): Boolean = p < d.size
     private fun u(i: Int) = d[i].toInt() and 0xFF
     fun byte(): Int = u(p++)

@@ -3,6 +3,7 @@ package uk.noammm.kav
 import android.Manifest
 import android.app.PictureInPictureParams
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -59,12 +60,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import uk.noammm.kav.data.Backup
 import uk.noammm.kav.data.JourneyFile
 import uk.noammm.kav.data.MapFile
 import uk.noammm.kav.data.Moovit
+import uk.noammm.kav.data.MoovitLink
 import uk.noammm.kav.data.Net
 import uk.noammm.kav.data.Updates
 import uk.noammm.kav.ui.*
@@ -72,8 +78,6 @@ import uk.noammm.kav.ui.*
 enum class Tab {
     Directions, Stations, Lines, Live;
 
-    /** Computed rather than held: an enum constant is built once, and a label stored
-     *  in it would freeze at whichever language happened to be loaded first. */
     val label: String get() = when (this) {
         Directions -> T("Home", "בית")
         Stations -> T("Stations", "תחנות")
@@ -82,8 +86,6 @@ enum class Tab {
     }
 }
 
-/** Parsing the national bundle costs ~1 s and ~110 MB; an activity restart must
- *  not pay it twice. */
 object Loaded {
     @Volatile private var net_: Net? = null
 
@@ -94,10 +96,23 @@ object Loaded {
     fun clear() { net_ = null }
 }
 
-/** Whether the activity is showing as a small window over other apps, and whether it should. */
 object Pip {
     var active by mutableStateOf(false)
     var wanted by mutableStateOf(false)
+}
+
+object PendingLink {
+    var plan by mutableStateOf<MoovitLink.Plan?>(null)
+}
+
+object PendingBackup {
+    var uri by mutableStateOf<android.net.Uri?>(null)
+
+    fun offer(ctx: android.content.Context, uri: android.net.Uri?): Boolean {
+        if (uri == null || !Backup.looksLikeBackup(ctx, uri)) return false
+        this.uri = uri
+        return true
+    }
 }
 
 class MainActivity : ComponentActivity() {
@@ -105,17 +120,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         K.accent = Color(Prefs.accent(this))
+        Shown.co2 = Prefs.showCo2(this)
         MapFile.init(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             addOnPictureInPictureModeChangedListener { Pip.active = it.isInPictureInPictureMode }
         }
         T.lang = Prefs.lang(this)
+        if (!PendingBackup.offer(this, intent?.data)) {
+            MoovitLink.parse(intent?.dataString)?.let { PendingLink.plan = it }
+        }
         setContent {
             KavTheme {
-                // Hebrew is read right to left, and Compose mirrors a whole tree from
-                // this one local: rows reverse, start/end padding swaps sides, text
-                // aligns to the right. The system locale cannot drive it here because
-                // Kav's language is its own setting, not the phone's.
                 CompositionLocalProvider(
                     LocalLayoutDirection provides if (T.rtl) LayoutDirection.Rtl else LayoutDirection.Ltr,
                 ) { LanguageSwitch { Root() } }
@@ -123,11 +138,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * A trip being navigated keeps a small window over whatever you switch to. On
-     * Android 12 and later the system enters it on its own from the params below; older
-     * versions are told on the way out.
-     */
     fun updatePipParams() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(2, 1))
@@ -141,30 +151,22 @@ class MainActivity : ComponentActivity() {
             runCatching { enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(2, 1)).build()) }
         }
     }
-}
 
-/* model */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (PendingBackup.offer(this, intent.data)) return
+        MoovitLink.parse(intent.dataString)?.let { PendingLink.plan = it }
+    }
+}
 
 data class ActiveJourney(
     val trip: Moovit.Itinerary,
     val resolved: Moovit.Resolved,
     val fromLabel: String,
     val toLabel: String,
-    /** Which line the rider is taking where a leg offers several: ride leg index → option. */
     val chosen: Map<Int, Int> = emptyMap(),
 )
 
-/**
- * A trip the rider actually took: its endpoints, and the route it went by.
- *
- * The times are not kept, they are stale the moment the trip ends, so offering one
- * back means planning it again for now. The route is worth keeping: someone who takes
- * the 472 into town wants the 472 again, not whatever the server happens to rank first
- * this morning. `lines` is each ride leg's line id in order, and `group` separates a
- * transit route from a taxi or a walk, which have no ride legs to name. Both together
- * identify the route without pinning any of its times. Empty `lines` and a negative
- * `group` mean an entry saved before routes were recorded.
- */
 data class RecentTrip(
     val from: Moovit.Place?,
     val to: Moovit.Place,
@@ -174,12 +176,6 @@ data class RecentTrip(
 )
 
 class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
-    /**
-     * The offline timetable. Null until something actually needs it: parsing the
-     * national bundle costs about a second and a hundred megabytes, and paying that
-     * at every launch, for a fallback that only matters with no signal, is what
-     * made the app stutter before it had shown anything.
-     */
     var net by mutableStateOf(net)
     var netLoading by mutableStateOf(false)
     var netError by mutableStateOf<String?>(null)
@@ -190,60 +186,32 @@ class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
     var activeJourney by mutableStateOf<ActiveJourney?>(null)
     var returnHome by mutableStateOf(false)
 
-    /** A trip being navigated owns the whole screen; the tabs step aside for it. */
     var navigating by mutableStateOf(false)
 
-    /**
-     * How far along the active journey the rider is, as an index into its steps. Moved
-     * by the clock, by the live vehicle and by the phone's own position, never by
-     * swiping the cards, which is reading ahead, not travelling.
-     */
     var journeyStep by mutableIntStateOf(0)
 
-    /**
-     * A place handed to Directions from another tab ("Start here" on a station).
-     * Directions is online, so it works in coordinates rather than the offline
-     * timetable's stop ids, passing one of those across did nothing at all before.
-     */
     var pendingFrom by mutableStateOf<Moovit.Place?>(null)
     var pendingTo by mutableStateOf<Moovit.Place?>(null)
-    /** A favourite the home strip asked to place: the picker opens straight into setting it. */
+    var pendingLink by mutableStateOf<MoovitLink.Plan?>(null)
     var settingFavourite by mutableStateOf<uk.noammm.kav.ui.Favourite?>(null)
 
-    /**
-     * The rider's favourite places, one source for every screen that shows them: the
-     * home strip and the search strip both read and write this, so a place set in one
-     * shows up in the other at once rather than after the tab is rebuilt.
-     */
     var favourites by mutableStateOf(ctx?.let { Prefs.favourites(it) } ?: emptyList())
     fun saveFavourites(ctx: Context, list: List<uk.noammm.kav.ui.Favourite>) {
         favourites = list
         Prefs.saveFavourites(ctx, list)
     }
 
-    // stations / lines
     var stationStop by mutableIntStateOf(-1)
     var lineRoute by mutableIntStateOf(-1)
 
-    /**
-     * What the rider last typed into each search box, kept here rather than in the
-     * list that draws it. Opening a stop or a line swaps the screen's AnimatedContent
-     * branch, which disposes that list and everything remembered inside it, so coming
-     * back after one tap used to land on an empty box and the whole nearby list again.
-     * The picker's own query is cleared once a place is actually picked: that search
-     * is finished, the other two are still where the rider was looking.
-     */
     var stopQuery by mutableStateOf("")
     var lineQuery by mutableStateOf("")
     var placeQuery by mutableStateOf("")
 
-    /** Where the phone is: the latest fix, and the same point for screens that only want a point. */
     var fix by mutableStateOf<Fix?>(null)
     var here by mutableStateOf<Pair<Double, Double>?>(null)
-    /** Which way the phone is facing, in degrees from north, while a trip is navigated. */
     var heading by mutableStateOf<Float?>(null)
 
-    /** What a plan may contain; kept by Prefs, applied to every request. */
     var filters by mutableStateOf(ctx?.let { Prefs.filters(it) } ?: ResultFilter.entries.toSet())
         private set
 
@@ -252,12 +220,19 @@ class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
         Prefs.setFilter(ctx, f, on)
     }
 
+    fun reloadPrefs(ctx: Context) {
+        favourites = Prefs.favourites(ctx)
+        filters = Prefs.filters(ctx)
+        K.accent = Color(Prefs.accent(ctx))
+        Shown.co2 = Prefs.showCo2(ctx)
+        T.switchTo(Prefs.lang(ctx))
+    }
+
     fun locate(lat: Double, lon: Double, speed: Float = 0f) {
         here = lat to lon
         fix = Fix(lat, lon, System.currentTimeMillis() / 1000, speed)
     }
 
-    /** A newer release on GitHub than the one running, once checked this launch. */
     var update by mutableStateOf<Updates.Release?>(null)
     var updateDismissed by mutableStateOf(false)
     var updateProgress by mutableStateOf<Float?>(null)
@@ -278,7 +253,6 @@ class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
         }
     }
 
-    /** Fetch the release's APK and hand it to the system installer. */
     suspend fun installUpdate(ctx: Context) {
         val release = update ?: return
         if (!Updates.canInstall(ctx)) { Updates.askInstallPermission(ctx); return }
@@ -303,17 +277,12 @@ class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
     }
 }
 
-/* root: first launch, then the shell */
-
 private val netLoadMutex = Mutex()
 
-/** Parse on demand, sharing one parse between every screen that browses it. */
 suspend fun loadNet(ctx: Context): Net = withContext(Dispatchers.Default) {
     netLoadMutex.withLock {
         Loaded.net ?: run {
             val n = ctx.assets.open("il.kav").use { Net.read(it) }
-            // Net.read is synchronous: keep its completed result even if its
-            // original caller left, so the next caller need not parse it again.
             Loaded.store(n)
             n
         }
@@ -334,9 +303,9 @@ private fun Root() {
     Box(Modifier.fillMaxSize()) {
         Shell(model)
         if (Pip.active) PipOverlay(model)
+        else if (PendingBackup.uri != null) ImportPrompt(model)
         else {
             UpdatePrompt(model)
-            // the map's offer waits its turn behind an update's
             if (model.update == null || model.updateDismissed) MapPrompt()
         }
     }
@@ -350,19 +319,11 @@ private fun Shell(model: KavModel) {
     ) { granted ->
         if (granted.values.any { it }) requestLocationOnce(ctx) { model.locate(it.first, it.second) }
     }
-    // Ask once at startup so nearby stops / live vehicles work without hunting for a
-    // button, and ask for BOTH, because a coarse-only grant is fuzzed to a grid cell
-    // a kilometre or more across, which plans your trip from the wrong town.
     LaunchedEffect(Unit) {
         if (!hasPreciseLocation(ctx)) askLocation.launch(
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
         )
     }
-    // And ask AGAIN on every resume until there is a fix. requestLocationOnce gives up
-    // immediately when every provider is switched off, so opening Kav with location off
-    // used to leave "My location" missing for the rest of the process: turning location
-    // on changed nothing, because nothing asked a second time. Coming back from the
-    // system toggle is a resume, and this is what notices.
     val shellLifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(shellLifecycle) {
         shellLifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -372,8 +333,6 @@ private fun Shell(model: KavModel) {
         }
     }
 
-    // The shell outlives both browser tabs. collect (not collectLatest) lets a
-    // parse finish through rapid switches; a real failure waits for Retry.
     LaunchedEffect(model) {
         snapshotFlow { model.tab to model.netLoadAttempt }.collect { (tab, _) ->
             if (tab != Tab.Stations && tab != Tab.Lines) return@collect
@@ -391,10 +350,6 @@ private fun Shell(model: KavModel) {
         }
     }
 
-    // A trip being navigated is not the process's to lose. It is kept on disk as
-    // it changes, offered back at the next launch while it could still be under
-    // way, and forgotten when it is ended; the step comes back with it, so the
-    // journey resumes where the rider was, not at the first walk.
     LaunchedEffect(model) {
         withContext(Dispatchers.IO) { JourneyFile.load(ctx) }?.let { (journey, step) ->
             if (model.activeJourney == null) {
@@ -410,61 +365,64 @@ private fun Shell(model: KavModel) {
         }
     }
 
+    LaunchedEffect(model) {
+        snapshotFlow { PendingLink.plan }.collect { plan ->
+            if (plan == null) return@collect
+            PendingLink.plan = null
+            if (plan.toLat == null || plan.toLon == null) return@collect
+            model.pendingLink = plan
+            model.settingsOpen = false
+            model.tab = Tab.Directions
+        }
+    }
+
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(model, model.activeJourney?.trip, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                val journey = model.activeJourney ?: break
-                // A journey brought back into a fresh process has no session yet:
-                // make one the way planning would, and keep trying while the trip
-                // is on, because reopening happens in tunnels and basements too.
-                val session = Online.session ?: try {
-                    withContext(Dispatchers.IO) {
-                        val at = journey.trip.legs.firstOrNull { it.shape.isNotEmpty() }?.shape?.first()
-                            ?: model.here ?: (32.0759 to 34.7745)
-                        Moovit.register(at.first, at.second)
-                    }.also { Online.session = it }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    null
-                }
-                if (session == null) { delay(15_000L); continue }
-                val needsNames = journey.trip.rides.flatMap { it.options }.any { ride ->
-                    (ride.lineId > 0 && journey.resolved.line(ride.lineId) == null) ||
-                        (ride.fromStop > 0 && journey.resolved.stop(ride.fromStop) == null) ||
-                        (ride.toStop > 0 && journey.resolved.stop(ride.toStop) == null)
-                }
-                if (needsNames) {
-                    val names = withContext(Dispatchers.IO) { Moovit.hydrate(session, listOf(journey.trip)) }
-                    model.activeJourney?.takeIf { it.trip == journey.trip }?.let { current ->
-                        val previous = current.resolved
-                        model.activeJourney = current.copy(resolved = Moovit.Resolved(
-                            previous.lines + names.lines, previous.stops + names.stops,
-                            previous.routeTypes + names.routeTypes, previous.live + names.live,
-                            previous.shapes + names.shapes, names.pollSecs, previous.patterns + names.patterns,
-                        ))
-                    }
-                }
-                delay(journey.resolved.pollSecs.coerceIn(15, 120) * 1000L)
-                val current = model.activeJourney?.takeIf { it.trip == journey.trip } ?: break
-                val refreshed = withContext(Dispatchers.IO) {
-                    Moovit.refreshLive(session, listOf(current.trip), current.resolved)
-                }
-                model.activeJourney?.takeIf { it.trip == journey.trip }?.let {
-                    model.activeJourney = it.copy(resolved = Moovit.Resolved(
-                        refreshed.lines + it.resolved.lines, refreshed.stops + it.resolved.stops,
-                        refreshed.routeTypes + it.resolved.routeTypes, refreshed.live,
-                        refreshed.shapes + it.resolved.shapes, refreshed.pollSecs, refreshed.patterns,
+    LaunchedEffect(model, model.activeJourney?.trip) {
+        while (true) {
+            val journey = model.activeJourney ?: break
+            val session = Online.session ?: try {
+                withContext(Dispatchers.IO) {
+                    val at = journey.trip.legs.firstOrNull { it.shape.isNotEmpty() }?.shape?.first()
+                        ?: model.here ?: (32.0759 to 34.7745)
+                    Moovit.register(at.first, at.second)
+                }.also { Online.session = it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            if (session == null) { delay(15_000L); continue }
+            val needsNames = journey.trip.rides.flatMap { it.options }.any { ride ->
+                (ride.lineId > 0 && journey.resolved.line(ride.lineId) == null) ||
+                    (ride.fromStop > 0 && journey.resolved.stop(ride.fromStop) == null) ||
+                    (ride.toStop > 0 && journey.resolved.stop(ride.toStop) == null)
+            }
+            if (needsNames) {
+                val names = withContext(Dispatchers.IO) { Moovit.hydrate(session, listOf(journey.trip)) }
+                model.activeJourney?.takeIf { it.trip == journey.trip }?.let { current ->
+                    val previous = current.resolved
+                    model.activeJourney = current.copy(resolved = Moovit.Resolved(
+                        previous.lines + names.lines, previous.stops + names.stops,
+                        previous.routeTypes + names.routeTypes, previous.live + names.live,
+                        previous.shapes + names.shapes, names.pollSecs, previous.patterns + names.patterns,
                     ))
                 }
+            }
+            delay(journey.resolved.pollSecs.coerceIn(15, 120) * 1000L)
+            val current = model.activeJourney?.takeIf { it.trip == journey.trip } ?: break
+            val refreshed = withContext(Dispatchers.IO) {
+                Moovit.refreshLive(session, listOf(current.trip), current.resolved)
+            }
+            model.activeJourney?.takeIf { it.trip == journey.trip }?.let {
+                model.activeJourney = it.copy(resolved = Moovit.Resolved(
+                    refreshed.lines + it.resolved.lines, refreshed.stops + it.resolved.stops,
+                    refreshed.routeTypes + it.resolved.routeTypes, refreshed.live,
+                    refreshed.shapes + it.resolved.shapes, refreshed.pollSecs, refreshed.patterns,
+                ))
             }
         }
     }
 
-    // While a trip is under way the phone keeps its position current, in the
-    // foreground and in the small window, never once the app is put away, and the
-    // journey's step is worked out from it every couple of seconds.
     val journeyActive = model.activeJourney != null
     LaunchedEffect(journeyActive, lifecycle) {
         if (!journeyActive) return@LaunchedEffect
@@ -486,7 +444,74 @@ private fun Shell(model: KavModel) {
             delay(2000)
         }
     }
-    // The compass only matters while the map is following you.
+    val askNotice = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+    LaunchedEffect(journeyActive) {
+        if (!journeyActive) { TripService.stop(ctx); return@LaunchedEffect }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) askNotice.launch(Manifest.permission.POST_NOTIFICATIONS)
+        while (true) {
+            model.activeJourney?.let { journey ->
+                val steps = buildSteps(journey.trip, journey.fromLabel, journey.toLabel)
+                if (steps.isNotEmpty()) {
+                    val index = model.journeyStep.coerceIn(0, steps.lastIndex)
+                    val (title, detail) = stepInstruction(
+                        steps[index], journey, index == steps.lastIndex - 1,
+                        System.currentTimeMillis() / 1000,
+                    )
+                    TripService.show(ctx, title, detail, index)
+                }
+            }
+            withTimeoutOrNull(30_000) {
+                snapshotFlow { model.activeJourney to model.journeyStep }.drop(1).first()
+            }
+        }
+    }
+    DisposableEffect(Unit) {
+        TripBridge.end = { model.activeJourney = null }
+        onDispose { TripBridge.end = null }
+    }
+    LaunchedEffect(model.activeJourney?.trip) {
+        val journey0 = model.activeJourney ?: return@LaunchedEffect
+        val steps = buildSteps(journey0.trip, journey0.fromLabel, journey0.toLabel)
+        val fired = HashSet<String>()
+        while (true) {
+            val journey = model.activeJourney?.takeIf { it.trip === journey0.trip } ?: break
+            val now = System.currentTimeMillis() / 1000
+            val r = journey.resolved
+            when (val step = steps.getOrNull(model.journeyStep.coerceIn(0, steps.lastIndex))) {
+                is Step.Wait -> {
+                    val (ride, wait) = boardingChoice(step.ride, step.wait, journey.chosen[step.legIndex] ?: 0)
+                    val dep = r.departures(ride, wait).firstOrNull { it.tripId == ride.tripId }
+                    val at = dep?.timeUtc ?: ride.dep
+                    val line = ride.shortName.ifBlank { r.line(ride.lineId)?.number.orEmpty() }
+                    if (at - now in 0..90 && line.isNotBlank() && fired.add("wait-${step.legIndex}")) {
+                        TripService.alert(
+                            ctx, T("$line is arriving", "$line מגיע"),
+                            listOfNotNull(r.stopName(ride.fromStop), whenLabel(at, now)).joinToString(" · "),
+                        )
+                    }
+                }
+                is Step.Ride -> {
+                    val (ride, _) = boardingChoice(step.ride, step.wait, journey.chosen[step.legIndex] ?: 0)
+                    val total = ride.stops.size
+                    val progress = stopsProgress(ride, r.stops, r.arrival(ride), model.fix, now)
+                    val nearEnd = (progress >= 0 && total >= 2 && progress >= total - 1f) ||
+                        (progress < 0 && ride.arr - now in 0..120)
+                    if (nearEnd && fired.add("ride-${step.legIndex}")) {
+                        TripService.alert(
+                            ctx, T("Get off at the next stop", "רדו בתחנה הבאה"),
+                            r.stopName(ride.toStop) ?: journey.toLabel,
+                        )
+                    }
+                }
+                else -> {}
+            }
+            delay(5_000)
+        }
+    }
     LaunchedEffect(model.navigating, lifecycle) {
         Pip.wanted = model.navigating
         (ctx as? MainActivity)?.updatePipParams()
@@ -497,9 +522,6 @@ private fun Shell(model: KavModel) {
         }
     }
 
-    // Back, anywhere the page itself has no use for it: another tab or Settings goes
-    // to Home, and Home asks before leaving the app. Pages register their own handlers
-    // after this one, so theirs win while they have something to close.
     var exitAsk by remember { mutableStateOf(false) }
     BackHandler(enabled = !model.navigating) {
         when {
@@ -532,15 +554,12 @@ private fun Shell(model: KavModel) {
             Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.safeDrawing).background(K.bg))
         },
         bottomBar = {
-            // still reserve the system inset, or the navigate card would sit under
-            // the gesture bar the moment the tabs went away
             if (model.navigating) Spacer(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.safeDrawing))
             else TabBar(model)
         },
     ) { pad ->
         val direction = LocalLayoutDirection.current
         CompositionLocalProvider(LocalBottomBarInset provides pad.calculateBottomPadding()) {
-        // Pages draw behind the floating tabs; only their controls/scroll content avoid them.
         Box(Modifier.padding(
             start = pad.calculateStartPadding(direction), top = pad.calculateTopPadding(),
             end = pad.calculateEndPadding(direction),
@@ -568,7 +587,55 @@ private fun Shell(model: KavModel) {
     }
 }
 
-/** "Exit Kav?", the last back press on Home, so a stray swipe cannot close the app. */
+@Composable
+private fun ImportPrompt(model: KavModel) {
+    val ctx = LocalContext.current
+    val uri = PendingBackup.uri ?: return
+    var failed by remember(uri) { mutableStateOf<String?>(null) }
+    Dialog(onDismissRequest = { PendingBackup.uri = null }) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(K.rCard)).background(K.surface1).padding(K.gap5),
+            verticalArrangement = Arrangement.spacedBy(K.gap4),
+        ) {
+            Text(T("Import this backup?", "לייבא את הגיבוי הזה?"), fontSize = 19.sp, color = K.text, fontWeight = FontWeight.SemiBold)
+            Text(
+                failed ?: T(
+                    "Your saved places, trip history and settings are replaced by what this file holds. " +
+                        "The map stays where it is.",
+                    "המקומות השמורים, היסטוריית הנסיעות וההגדרות שלכם יוחלפו במה שיש בקובץ הזה. " +
+                        "המפה נשארת במקומה.",
+                ),
+                fontSize = 14.sp, color = if (failed != null) K.critical else K.dim, lineHeight = 20.sp,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+                Box(
+                    Modifier.weight(1f).heightIn(min = 46.dp).clip(RoundedCornerShape(K.rPill)).background(K.plateStrong)
+                        .clickable(role = Role.Button) { PendingBackup.uri = null },
+                    contentAlignment = Alignment.Center,
+                ) { Text(T("Cancel", "ביטול"), fontSize = 15.sp, color = K.text) }
+                Box(
+                    Modifier.weight(1f).heightIn(min = 46.dp).clip(RoundedCornerShape(K.rPill)).background(K.accent)
+                        .clickable(role = Role.Button) {
+                            Backup.read(ctx, uri)
+                                .onSuccess { r ->
+                                    model.reloadPrefs(ctx)
+                                    PendingBackup.uri = null
+                                    android.widget.Toast.makeText(
+                                        ctx,
+                                        T("Imported: ${r.favourites} places, ${r.trips} trips, ${r.recents} searches",
+                                          "יובא: ${r.favourites} מקומות, ${r.trips} נסיעות, ${r.recents} חיפושים"),
+                                        android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                                .onFailure { e -> failed = importError(e) }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) { Text(T("Import", "ייבוא"), fontSize = 15.sp, color = K.bg, fontWeight = FontWeight.Medium) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ExitPrompt(onStay: () -> Unit, onExit: () -> Unit) {
     Dialog(onDismissRequest = onStay) {
@@ -594,9 +661,6 @@ private fun ExitPrompt(onStay: () -> Unit, onExit: () -> Unit) {
     }
 }
 
-/* The three tabs: Directions, Stations, Lines. What is deliberately absent is
-   the account, the upgrade prompt and the ad slots. */
-
 @Composable
 private fun TabBar(model: KavModel) {
     NavigationBar(modifier = Modifier.padding(horizontal = K.gap3, vertical = K.gap2).glassSurface(28.dp),
@@ -606,7 +670,6 @@ private fun TabBar(model: KavModel) {
             NavigationBarItem(
                 selected = on,
                 onClick = {
-                    // a tab tapped over Settings is a way out of Settings too
                     model.settingsOpen = false
                     if (on) { model.stationStop = -1; model.lineRoute = -1 }
                     if (t == Tab.Directions) model.returnHome = true
@@ -631,24 +694,20 @@ private fun TabGlyph(tab: Tab, tint: Color) {
         fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
             drawLine(tint, Offset(x1 * w, y1 * h), Offset(x2 * w, y2 * h), sw, StrokeCap.Round)
         when (tab) {
-            // home
             Tab.Directions -> {
                 line(.10f, .45f, .50f, .12f); line(.50f, .12f, .90f, .45f)
                 line(.23f, .40f, .23f, .86f); line(.23f, .86f, .77f, .86f)
                 line(.77f, .86f, .77f, .40f); line(.43f, .86f, .43f, .62f)
                 line(.43f, .62f, .59f, .62f); line(.59f, .62f, .59f, .86f)
             }
-            // a stop node on a post
             Tab.Stations -> {
                 drawCircle(tint, w * .20f, Offset(w * .50f, h * .34f), style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
                 line(.50f, .54f, .50f, .86f); line(.32f, .86f, .68f, .86f)
             }
-            // an index of lines, each with its own stop node
             Tab.Lines -> listOf(.22f, .50f, .78f).forEachIndexed { i, y ->
                 drawCircle(tint, w * .085f, Offset(w * .18f, h * y))
                 line(.34f, y, if (i == 1) .86f else .70f, y)
             }
-            // a live signal: a dot with a broadcast ring
             Tab.Live -> {
                 drawCircle(tint, w * .14f, Offset(w * .5f, h * .5f))
                 drawCircle(tint, w * .30f, Offset(w * .5f, h * .5f), style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
@@ -658,20 +717,12 @@ private fun TabGlyph(tab: Tab, tint: Color) {
     }
 }
 
-/* location: coarse, one shot, never stored, never sent
-   Last-known alone is not enough. A provider only produces a fix once some
-   client asks for updates, so on a phone that has not been located recently,
-   and on any fresh emulator, getLastKnownLocation returns null forever and
-   "Nearby stops" silently stays empty. Ask for one real update, and use the
-   cached fix meanwhile if there is one. */
-
 fun hasLocationPermission(ctx: Context): Boolean =
     ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED ||
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED
 
-/** True only with the precise grant. Coarse alone is fuzzed to about a kilometre. */
 fun hasPreciseLocation(ctx: Context): Boolean =
     ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED
@@ -688,9 +739,6 @@ fun lastKnownLocation(ctx: Context): Pair<Double, Double>? {
     } catch (e: SecurityException) { null }
 }
 
-/** Reports the cached fix immediately when there is one, then the first fresh
- *  fix. Unregisters after one update or 25 s, whichever comes first, nothing
- *  keeps listening in the background. */
 fun requestLocationOnce(ctx: Context, onResult: (Pair<Double, Double>) -> Unit) {
     if (!hasLocationPermission(ctx)) return
     lastKnownLocation(ctx)?.let(onResult)
@@ -706,8 +754,6 @@ fun requestLocationOnce(ctx: Context, onResult: (Pair<Double, Double>) -> Unit) 
         done = true
         listener?.let { runCatching { lm.removeUpdates(it) } }
     }
-    // every method spelled out: LocationListener only gained default
-    // implementations in API 30, and minSdk here is 26
     listener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             if (done) return
@@ -725,11 +771,6 @@ fun requestLocationOnce(ctx: Context, onResult: (Pair<Double, Double>) -> Unit) 
     Handler(Looper.getMainLooper()).postDelayed({ stop() }, 25_000)
 }
 
-/**
- * Continuous fixes for a trip under way: GPS every second or two metres, the network
- * provider as a stand-in indoors. Returns the call that stops listening; the caller
- * ties it to the screen being visible, so nothing follows you once the app is away.
- */
 fun trackLocation(ctx: Context, onFix: (Location) -> Unit): () -> Unit {
     if (!hasLocationPermission(ctx)) return {}
     val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return {}
@@ -754,10 +795,6 @@ fun trackLocation(ctx: Context, onFix: (Location) -> Unit): () -> Unit {
     return { runCatching { lm.removeUpdates(listener) } }
 }
 
-/**
- * Which way the phone points, from the rotation vector, corrected for how the
- * screen is turned and smoothed so the map does not twitch with every step.
- */
 fun trackHeading(ctx: Context, onHeading: (Float) -> Unit): () -> Unit {
     val sm = ctx.getSystemService(Context.SENSOR_SERVICE) as? SensorManager ?: return {}
     val sensor = sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR) ?: return {}
@@ -793,8 +830,6 @@ fun trackHeading(ctx: Context, onHeading: (Float) -> Unit): () -> Unit {
     return { sm.unregisterListener(listener) }
 }
 
-/** Is there actually a usable network? Used to tell "offline" apart from "the online
- *  call failed", which are different things and must not print the same sentence. */
 fun hasNetwork(ctx: Context): Boolean = try {
     val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
     val n = cm.activeNetwork
@@ -804,19 +839,11 @@ fun hasNetwork(ctx: Context): Boolean = try {
         caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
 } catch (e: Exception) { false }
 
-/* preferences */
-
 object Prefs {
     private const val FILE = "kav"
 
     private fun store(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
-    /**
-     * The places you have picked before. Moovit's search screen opens on these, and it
-     * is the difference between typing your own street every morning and tapping it.
-     * Kept on the device in the app's own preferences, nothing is synced, because
-     * there is no account to sync it to.
-     */
     private const val RECENTS = "recents"
     private const val MAX_RECENTS = 8
 
@@ -838,7 +865,6 @@ object Prefs {
         store(ctx).edit().putString(RECENTS, arr.toString()).apply()
     }
 
-    /** The trips you have taken, newest first, what Home offers back. */
     private const val TRIPS = "trips"
     private const val MAX_TRIPS = 6
 
@@ -866,7 +892,6 @@ object Prefs {
         }
     } catch (e: Exception) { emptyList() }
 
-    /** One entry per pair of places, to four decimals, about eleven metres. */
     private fun tripKey(t: RecentTrip) =
         "%.4f,%.4f>%.4f,%.4f".format(t.from?.lat ?: 0.0, t.from?.lon ?: 0.0, t.to.lat, t.to.lon)
 
@@ -882,7 +907,6 @@ object Prefs {
         store(ctx).edit().putString(TRIPS, arr.toString()).apply()
     }
 
-    /** A null origin is "wherever I am", which is what it will mean next time too. */
     fun rememberTrip(
         ctx: Context,
         from: Moovit.Place?,
@@ -898,12 +922,6 @@ object Prefs {
         saveTrips(ctx, (listOf(fresh) + trips(ctx)).distinctBy(::tripKey).take(MAX_TRIPS))
     }
 
-    /**
-     * The rider picked a route for a trip they have taken before: remember that one as
-     * the way they go, so the entry reopens it rather than today's top result. It only
-     * updates an entry that is already there, reading a plan is not the same as having
-     * taken the trip, and the list stays a list of trips taken.
-     */
     fun noteTripRoute(ctx: Context, from: Moovit.Place?, to: Moovit.Place, trip: Moovit.Itinerary) {
         val want = tripKey(RecentTrip(from, to, 0L))
         val trips = trips(ctx)
@@ -919,24 +937,32 @@ object Prefs {
 
     fun clearRecents(ctx: Context) = store(ctx).edit().remove(RECENTS).apply()
 
-    /** The accent, as ARGB. */
+    private const val RECENT_LINES = "recentLines"
+    private const val MAX_RECENT_LINES = 8
+
+    fun recentLines(ctx: Context): List<String> = try {
+        val arr = org.json.JSONArray(store(ctx).getString(RECENT_LINES, "[]"))
+        (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+    } catch (e: Exception) { emptyList() }
+
+    fun rememberLine(ctx: Context, key: String) {
+        val kept = (listOf(key) + recentLines(ctx)).distinct().take(MAX_RECENT_LINES)
+        store(ctx).edit().putString(RECENT_LINES, org.json.JSONArray(kept).toString()).apply()
+    }
+
     fun accent(ctx: Context): Int = store(ctx).getInt("accent", android.graphics.Color.rgb(0x9A, 0xBE, 0xFF))
     fun setAccent(ctx: Context, argb: Int) = store(ctx).edit().putInt("accent", argb).apply()
 
-    /**
-     * Kav's own language. Deliberately not the phone's: Moovit answers in Hebrew
-     * whatever the phone is set to, so a rider with an English phone was reading
-     * Hebrew stop names inside English sentences with no way to fix either half.
-     */
     fun lang(ctx: Context): Lang =
         Lang.entries.firstOrNull { it.code == store(ctx).getString("lang", null) } ?: Lang.EN
     fun setLang(ctx: Context, lang: Lang) = store(ctx).edit().putString("lang", lang.code).apply()
 
-    /** Set once the first-launch screens have been through. */
+    fun showCo2(ctx: Context): Boolean = store(ctx).getBoolean("showCo2", false)
+    fun setShowCo2(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("showCo2", on).apply()
+
     fun onboarded(ctx: Context): Boolean = store(ctx).getBoolean("onboarded", false)
     fun setOnboarded(ctx: Context) = store(ctx).edit().putBoolean("onboarded", true).apply()
 
-    /** The result filters switched OFF are what is stored, so a new filter starts on. */
     fun filters(ctx: Context): Set<ResultFilter> {
         val off = store(ctx).getStringSet("filtersOff", emptySet()).orEmpty()
         return ResultFilter.entries.filter { it.name !in off }.toSet()
@@ -947,7 +973,34 @@ object Prefs {
         store(ctx).edit().putStringSet("filtersOff", off).apply()
     }
 
-    /** Named places: Home is always first, the rest are the rider's own. */
+    fun backupJson(ctx: Context): org.json.JSONObject {
+        val s = store(ctx)
+        fun arr(key: String) =
+            runCatching { org.json.JSONArray(s.getString(key, "[]")) }.getOrElse { org.json.JSONArray() }
+        return org.json.JSONObject()
+            .put("favourites", arr("favourites"))
+            .put("trips", arr("trips"))
+            .put("recents", arr("recents"))
+            .put("lang", lang(ctx).code)
+            .put("accent", accent(ctx))
+            .put("filtersOff", org.json.JSONArray(s.getStringSet("filtersOff", emptySet()).orEmpty().toList()))
+            .put("showCo2", showCo2(ctx))
+    }
+
+    fun restoreBackup(ctx: Context, o: org.json.JSONObject) {
+        val e = store(ctx).edit()
+        for (key in listOf("favourites", "trips", "recents")) {
+            o.optJSONArray(key)?.let { e.putString(key, it.toString()) }
+        }
+        if (o.has("lang")) e.putString("lang", o.optString("lang"))
+        if (o.has("accent")) e.putInt("accent", o.optInt("accent"))
+        o.optJSONArray("filtersOff")?.let { a ->
+            e.putStringSet("filtersOff", (0 until a.length()).map { a.optString(it) }.toSet())
+        }
+        if (o.has("showCo2")) e.putBoolean("showCo2", o.optBoolean("showCo2"))
+        e.apply()
+    }
+
     fun favourites(ctx: Context): List<Favourite> = try {
         val arr = org.json.JSONArray(store(ctx).getString("favourites", "[]"))
         val saved = (0 until arr.length()).mapNotNull { i ->
