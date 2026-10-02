@@ -12,8 +12,10 @@ android {
         applicationId = "uk.noammm.kav"
         minSdk = 26
         targetSdk = 35
-        versionCode = 19
-        versionName = "2.0"
+        // CI builds count up from 1000 so every build installs as an update.
+        val ci = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+        versionCode = if (ci != null) 1000 + ci else 19
+        versionName = if (ci != null) "2.0-gigi.$ci" else "2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // MapLibre's renderer is native code. Every phone Kav can reach is arm64;
         // x86_64 stays so the release APK still installs on the emulator.
