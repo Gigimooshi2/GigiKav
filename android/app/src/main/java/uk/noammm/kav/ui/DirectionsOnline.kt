@@ -74,6 +74,7 @@ fun DirectionsOnline(model: KavModel) {
     var open by remember { mutableStateOf<OpenTrip?>(null) }
     var sort by remember { mutableStateOf(Sort.RECOMMENDED) }
     var departAt by remember { mutableLongStateOf(0L) }
+    var nudgedAt by remember { mutableLongStateOf(0L) }
     var timeType by remember { mutableIntStateOf(Moovit.TIME_DEPARTURE) }
     var whenOpen by remember { mutableStateOf(false) }
     var orderOpen by remember { mutableStateOf(false) }
@@ -129,7 +130,7 @@ fun DirectionsOnline(model: KavModel) {
             error = TOO_CLOSE; planning = false; return@LaunchedEffect
         }
         planning = true
-        if (departAt != 0L) delay(250)
+        if (System.currentTimeMillis() - nudgedAt < 1_000L) delay(700) else if (departAt != 0L) delay(250)
         try {
             val s = Online.open(fromLL)
             val res = withContext(Dispatchers.IO) {
@@ -366,6 +367,34 @@ fun DirectionsOnline(model: KavModel) {
                     PreciseLocationNudge()
                 }
             }
+            if (timeType != Moovit.TIME_LAST && fromLL != null && toLL != null && error != TOO_CLOSE) item(key = "shift") {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = K.gap3, vertical = K.gap1),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    fun nudge(delta: Long) {
+                        val now = System.currentTimeMillis()
+                        val base = if (departAt == 0L) now else departAt
+                        departAt = (base + delta).let { if (kotlin.math.abs(it - now) < 60_000L) 0L else it }
+                        if (departAt == 0L) timeType = Moovit.TIME_DEPARTURE
+                        nudgedAt = System.currentTimeMillis()
+                    }
+                    ShiftButton(T("‹ Earlier", "› מוקדם יותר")) { nudge(-15 * 60_000L) }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        (if (planning || shown.isEmpty()) {
+                            if (departAt == 0L) T("Now", "עכשיו")
+                            else java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(departAt))
+                        } else shown.firstOrNull()?.let {
+                            java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+                                .format(java.util.Date(it.dep * 1000))
+                        }).orEmpty(),
+                        fontSize = 12.sp, color = K.dim,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    ShiftButton(T("Later ›", "מאוחר יותר ‹")) { nudge(15 * 60_000L) }
+                }
+            }
             when {
                 error == TOO_CLOSE -> item {
                     Note(
@@ -397,30 +426,6 @@ fun DirectionsOnline(model: KavModel) {
                     )
                 }
                 else -> {
-                    if (timeType != Moovit.TIME_LAST) item(key = "shift") {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = K.gap3, vertical = K.gap1),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            fun nudge(delta: Long) {
-                                val now = System.currentTimeMillis()
-                                val base = if (departAt == 0L) now else departAt
-                                departAt = (base + delta).let { if (kotlin.math.abs(it - now) < 60_000L) 0L else it }
-                                if (departAt == 0L) timeType = Moovit.TIME_DEPARTURE
-                            }
-                            ShiftButton(T("‹ Earlier", "› מוקדם יותר")) { nudge(-15 * 60_000L) }
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                shown.firstOrNull()?.let {
-                                    java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
-                                        .format(java.util.Date(it.dep * 1000))
-                                }.orEmpty(),
-                                fontSize = 12.sp, color = K.dim,
-                            )
-                            Spacer(Modifier.weight(1f))
-                            ShiftButton(T("Later ›", "מאוחר יותר ‹")) { nudge(15 * 60_000L) }
-                        }
-                    }
                     items(shown.size) { i ->
                         Column(Modifier.padding(horizontal = K.gap3)) {
                             val heading = plan.heading(shown[i])
