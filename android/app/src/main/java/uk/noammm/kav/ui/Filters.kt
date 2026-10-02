@@ -3,6 +3,8 @@ package uk.noammm.kav.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ElectricScooter
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -23,7 +25,7 @@ import androidx.compose.ui.unit.sp
 import uk.noammm.kav.data.Moovit
 
 enum class ResultFilter {
-    BUS, TRAIN, LIGHT_RAIL, CARMELIT_RAKAVLIT, SHUTTLE, TAXI, BIKE, WALK;
+    BUS, TRAIN, LIGHT_RAIL, CARMELIT_RAKAVLIT, SHUTTLE, TAXI, BIKE, SHARED, WALK;
 
     val label: String
         get() = when (this) {
@@ -34,6 +36,7 @@ enum class ResultFilter {
             SHUTTLE -> T("Shuttle", "שאטל")
             TAXI -> T("Taxi", "מונית")
             BIKE -> T("Bike", "אופניים")
+            SHARED -> T("Shared mobility", "תחבורה שיתופית")
             WALK -> T("Walking only", "הליכה בלבד")
         }
 
@@ -46,6 +49,7 @@ enum class ResultFilter {
             SHUTTLE -> T("Municipal shuttle lines", "קווי שאטל עירוניים")
             TAXI -> T("Gett rides, on their own or before a train", "נסיעות Gett, בפני עצמן או לפני רכבת")
             BIKE -> T("Cycling routes", "מסלולי אופניים")
+            SHARED -> T("Rental scooters and bike share", "קורקינטים ואופניים שיתופיים")
             WALK -> T("Routes done entirely on foot", "מסלולים המתבצעים כולם ברגל")
         }
 }
@@ -67,9 +71,12 @@ fun filterResults(list: List<Moovit.Itinerary>, on: Set<ResultFilter>, r: Moovit
         val hasRide = legs.any { l -> l.kind == Moovit.LegKind.RIDE }
         val hasTaxi = legs.any { l -> l.kind == Moovit.LegKind.TAXI }
         val hasBike = legs.any { l -> l.kind == Moovit.LegKind.BIKE }
+        // Moovit's scooter / bike-share legs are the ones Kav doesn't parse.
+        val hasShared = legs.any { l -> l.kind == Moovit.LegKind.OTHER }
+        if (ResultFilter.SHARED !in on && hasShared) return@filter false
         if (ResultFilter.TAXI !in on && hasTaxi) return@filter false
         if (ResultFilter.BIKE !in on && hasBike) return@filter false
-        if (ResultFilter.WALK !in on && !hasRide && !hasTaxi && !hasBike) return@filter false
+        if (ResultFilter.WALK !in on && !hasRide && !hasTaxi && !hasBike && !hasShared) return@filter false
         legs.filter { l -> l.kind == Moovit.LegKind.RIDE }.all { ride ->
             val info = r.line(ride.lineId) ?: return@all true
             val rt = r.routeType(info.agencyId)
@@ -126,6 +133,10 @@ fun FilterRows(enabled: Set<ResultFilter>, onToggle: (ResultFilter, Boolean) -> 
                     ResultFilter.SHUTTLE -> ShuttleMark(18.dp)
                     ResultFilter.TAXI -> ModeGlyph(Mode.TAXI, if (on) K.text else K.dim, 18.dp)
                     ResultFilter.BIKE -> BikeGlyph(if (on) K.text else K.dim)
+                    ResultFilter.SHARED -> androidx.compose.material3.Icon(
+                        Icons.Rounded.ElectricScooter, null,
+                        tint = if (on) K.text else K.dim, modifier = Modifier.size(18.dp),
+                    )
                     ResultFilter.WALK -> WalkGlyph(if (on) K.text else K.dim, 16.dp)
                 }
             }
