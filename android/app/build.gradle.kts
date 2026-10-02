@@ -22,6 +22,17 @@ android {
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
+    // A fixed key in the repo, so every CI build installs over the last one.
+    val kavKey = rootProject.file("../signing/debug.keystore")
+    signingConfigs {
+        create("kav") {
+            storeFile = kavKey
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
@@ -31,7 +42,7 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             // Signed with the local debug key: there is no store listing, and an update
             // only installs over the previous one if both carry the same signature.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (kavKey.exists()) "kav" else "debug")
         }
     }
 

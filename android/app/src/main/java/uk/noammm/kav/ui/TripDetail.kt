@@ -63,6 +63,8 @@ fun TripDetailScreen(
     onStart: () -> Unit = {},
     onEnd: () -> Unit = {},
     onNavigating: (Boolean) -> Unit = {},
+    onShift: ((Int) -> Unit)? = null,
+    shifting: Boolean = false,
 ) {
     var tracking by remember { mutableStateOf<Pair<Moovit.Leg, Int>?>(null) }
     var navigating by remember(trip) { mutableStateOf(startInNavigation) }
@@ -104,7 +106,8 @@ fun TripDetailScreen(
             )
             else -> TripDetailBody(trip, r, fromLabel, toLabel, onBack = ::leavePlan,
                 onTrack = { leg, stopId -> tracking = leg to stopId },
-                onStart = { navigating = true; planFromNavigation = false; onStart() })
+                onStart = { navigating = true; planFromNavigation = false; onStart() },
+                onShift = onShift, shifting = shifting)
         }
     }
     alert?.let { (group, label) ->
@@ -122,6 +125,8 @@ private fun TripDetailBody(
     onBack: () -> Unit,
     onTrack: (Moovit.Leg, Int) -> Unit,
     onStart: () -> Unit,
+    onShift: ((Int) -> Unit)? = null,
+    shifting: Boolean = false,
 ) {
 
     Column(Modifier.fillMaxSize()) {
@@ -146,6 +151,20 @@ private fun TripDetailBody(
             .padding(bottom = LocalBottomBarInset.current)) {
             RouteMap(trip, r, modifier = Modifier.padding(horizontal = K.gap3, vertical = K.gap2))
             Summary(trip, r)
+            if (onShift != null) Row(
+                Modifier.fillMaxWidth().padding(horizontal = K.gap3, vertical = K.gap2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ShiftButton(T("‹ Earlier", "› מוקדם יותר")) { onShift(-1) }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (shifting) T("Searching…", "מחפשים…")
+                    else hm.format(Date(trip.dep * 1000)) + " – " + hm.format(Date(trip.arr * 1000)),
+                    fontSize = 13.sp, color = K.dim,
+                )
+                Spacer(Modifier.weight(1f))
+                ShiftButton(T("Later ›", "מאוחר יותר ‹")) { onShift(1) }
+            }
             Spacer(Modifier.height(K.gap3))
             Timeline(trip, r, fromLabel, toLabel, onTrack)
             Spacer(Modifier.height(K.gap8))

@@ -14,6 +14,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.animation.togetherWith
 import kotlinx.coroutines.withContext
 import uk.noammm.kav.ActiveJourney
 import uk.noammm.kav.KavModel
@@ -75,6 +77,8 @@ fun DirectionsOnline(model: KavModel) {
     var sort by remember { mutableStateOf(Sort.RECOMMENDED) }
     var departAt by remember { mutableLongStateOf(0L) }
     var nudgedAt by remember { mutableLongStateOf(0L) }
+    var shifting by remember { mutableStateOf(false) }
+    val shiftScope = rememberCoroutineScope()
     var timeType by remember { mutableIntStateOf(Moovit.TIME_DEPARTURE) }
     var whenOpen by remember { mutableStateOf(false) }
     var orderOpen by remember { mutableStateOf(false) }
@@ -257,11 +261,65 @@ fun DirectionsOnline(model: KavModel) {
     }
 
     val under by underSearch(picking != null)
+
+    // Same route, one departure earlier or later (like Moovit's single-route page).
+    fun shiftOpen(dir: Int) {
+        val cur = open ?: return
+        val a = fromLL ?: return
+        val b = toLL ?: return
+        if (shifting) return
+        shifting = true
+        shiftScope.launch {
+            try {
+                val s = Online.open(a)
+                val sig = cur.trip.rides.map { it.lineChoices.toSet() }
+                fun same(it: Moovit.Itinerary) = it.rides.size == sig.size &&
+                    it.rides.zip(sig).all { (leg, want) -> leg.lineChoices.any { c -> c in want } }
+                fun plan(atSec: Long, type: Int) = Moovit.planItineraries(
+                    s, a, b, atSec * 1000, type,
+                    routeTypes = routeTypesFor(filters), skipTaxi = ResultFilter.TAXI !in filters,
+                )
+                val (res, pick) = withContext(Dispatchers.IO) {
+                    if (dir > 0) {
+                        val r = plan(cur.trip.dep + 60, Moovit.TIME_DEPARTURE)
+                        r to r.laidOut().filter { same(it) && it.dep > cur.trip.dep }.minByOrNull { it.dep }
+                    } else {
+                        val r1 = plan(cur.trip.arr - 60, Moovit.TIME_ARRIVAL)
+                        val p1 = r1.laidOut().filter { same(it) && it.dep < cur.trip.dep }.maxByOrNull { it.dep }
+                        if (p1 != null) r1 to p1 else {
+                            val r2 = plan(cur.trip.dep - 45 * 60, Moovit.TIME_DEPARTURE)
+                            r2 to r2.laidOut().filter { same(it) && it.dep < cur.trip.dep }.maxByOrNull { it.dep }
+                        }
+                    }
+                }
+                if (pick == null) {
+                    android.widget.Toast.makeText(
+                        ctx,
+                        if (dir > 0) T("No later departure for this route.", "אין יציאה מאוחרת יותר למסלול הזה.")
+                        else T("No earlier departure for this route.", "אין יציאה מוקדמת יותר למסלול הזה."),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                } else {
+                    val rs = withContext(Dispatchers.IO) { Moovit.hydrate(s, listOf(pick)) }
+                    if (open === cur) open = cur.copy(trip = pick, resolved = rs)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("KavShift", "shift failed", e)
+                android.widget.Toast.makeText(ctx, T("Moovit did not answer.", "Moovit לא הגיב."), android.widget.Toast.LENGTH_SHORT).show()
+            } finally {
+                shifting = false
+            }
+        }
+    }
     androidx.compose.animation.AnimatedContent(
         targetState = Triple(open, showResults, autoOpen != null || linkTrip != null),
         modifier = Modifier.fillMaxSize().graphicsLayer { alpha = under },
         transitionSpec = {
-            if (targetState.first != null || (targetState.second && !initialState.second)) forward()
+            if (initialState.first != null && targetState.first != null)
+                androidx.compose.animation.fadeIn() togetherWith androidx.compose.animation.fadeOut()
+            else if (targetState.first != null || (targetState.second && !initialState.second)) forward()
             else backward()
         },
         label = "directions",
@@ -284,6 +342,8 @@ fun DirectionsOnline(model: KavModel) {
                     }
                 },
                 onNavigating = { model.navigating = it },
+                onShift = if (chosen.resume || active != null) null else { d -> shiftOpen(d) },
+                shifting = shifting,
                 onEnd = {
                     if (model.activeJourney?.trip === chosen.trip) model.activeJourney = null
                     toPlace?.let {
@@ -543,7 +603,7 @@ internal fun sameLines(candidate: Moovit.Itinerary, named: List<MoovitLink.Ride>
 }
 
 @Composable
-private fun ShiftButton(label: String, onClick: () -> Unit) {
+internal fun ShiftButton(label: String, onClick: () -> Unit) {
     Text(
         label, fontSize = 12.sp, color = K.text,
         modifier = Modifier.panel(K.rPill)
