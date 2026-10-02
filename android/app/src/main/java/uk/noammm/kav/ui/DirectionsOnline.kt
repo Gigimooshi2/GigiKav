@@ -405,7 +405,7 @@ fun DirectionsOnline(model: KavModel) {
                             fun nudge(delta: Long) {
                                 val now = System.currentTimeMillis()
                                 val base = if (departAt == 0L) now else departAt
-                                departAt = (base + delta).let { if (it < now + 60_000L) 0L else it }
+                                departAt = (base + delta).let { if (kotlin.math.abs(it - now) < 60_000L) 0L else it }
                                 if (departAt == 0L) timeType = Moovit.TIME_DEPARTURE
                             }
                             ShiftButton(T("‹ Earlier", "› מוקדם יותר")) { nudge(-15 * 60_000L) }

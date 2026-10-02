@@ -109,10 +109,6 @@ fun WhenSheet(
             }
             Spacer(Modifier.height(K.gap3))
             val picked = chosenMillis(start, day, picker.hour, picker.minute)
-            if (picked <= System.currentTimeMillis()) {
-                Text(T("That time has passed, this will depart now.", "השעה הזו כבר עברה, הנסיעה תצא עכשיו."), fontSize = 13.sp, color = K.dim)
-                Spacer(Modifier.height(K.gap2))
-            }
             Box(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp)
                     .panel(K.rControl)
@@ -187,7 +183,7 @@ private fun dayLabel(start: Calendar, offset: Int): String {
 }
 
 internal fun clampDepart(pickedMs: Long, timeType: Int, now: Long): Pair<Long, Int> =
-    if (pickedMs <= now) 0L to Moovit.TIME_DEPARTURE else pickedMs to timeType
+    if (kotlin.math.abs(pickedMs - now) < 60_000L) 0L to Moovit.TIME_DEPARTURE else pickedMs to timeType
 
 private fun chosenMillis(start: Calendar, offset: Int, hour: Int, minute: Int): Long =
     (start.clone() as Calendar).apply {
