@@ -2,6 +2,7 @@ package uk.noammm.kav.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,17 +14,23 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uk.noammm.kav.KavModel
 import uk.noammm.kav.PendingBackup
 import uk.noammm.kav.Prefs
 import uk.noammm.kav.data.Backup
+import uk.noammm.kav.data.Updates
 
 @Composable
 fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
@@ -40,6 +47,7 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
         AccentPreview(Modifier.padding(horizontal = K.gap4))
         Spacer(Modifier.height(K.gap4))
         AccentPicker(wheel = 200.dp) { Prefs.setAccent(ctx, it.toArgb()) }
+        LookChoices(inset = K.gap4) { Group(it) }
 
         Group(T("what a plan may show", "מה מסלול יכול לכלול"))
         FilterRows(model.filters) { f, on -> model.setFilter(ctx, f, on) }
@@ -55,6 +63,23 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
                 Shown.co2,
                 { on -> Shown.co2 = on; Prefs.setShowCo2(ctx, on) },
             ) { GlobeGlyph(if (Shown.co2) K.text else K.dim, K.surface1, 18.dp) }
+        }
+
+        Group(T("privacy", "פרטיות"))
+        Column(Modifier.fillMaxWidth().padding(horizontal = K.gap3)) {
+            var priv by remember { mutableStateOf(uk.noammm.kav.Prefs.privateSearch(ctx)) }
+            SwitchRow(
+                T("Private search", "חיפוש פרטי"),
+                T(
+                    "Keep your location off search and off the anonymous registration Kav makes " +
+                        "with Moovit. Planning a trip still sends the two points you pick, since that " +
+                        "is the trip you asked it to find.",
+                    "המיקום שלכם לא נשלח בחיפוש ולא ברישום האנונימי ש-Kav מבצעת מול Moovit. " +
+                        "תכנון מסלול עדיין שולח את שתי הנקודות שאתם בוחרים, כי זו הנסיעה שביקשתם למצוא.",
+                ),
+                priv,
+                { on -> priv = on; uk.noammm.kav.Prefs.setPrivateSearch(ctx, on); uk.noammm.kav.data.Moovit.shareLocation = !on },
+            ) { ShieldGlyph(if (priv) K.text else K.dim, 18.dp) }
         }
 
         Group(T("your data", "הנתונים שלכם"))
@@ -105,6 +130,29 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
         )
         Spacer(Modifier.height(K.gap8))
     }
+}
+
+@Composable
+internal fun LookChoices(inset: Dp = 0.dp, heading: @Composable (String) -> Unit) {
+    val ctx = LocalContext.current
+    heading(T("look", "מראה"))
+    Row(Modifier.padding(horizontal = inset).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+        for ((look, name) in listOf(Look.OLED to "OLED", Look.LIGHT to T("Light", "בהיר"), Look.DARK to T("Dark", "כהה"))) {
+            Chip(name, K.look == look) { K.applyTheme(look); Prefs.setLook(ctx, look) }
+        }
+    }
+    if (!liquidGlassReady) return
+    heading(T("glass", "זכוכית"))
+    Row(Modifier.padding(horizontal = inset).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+        Chip(T("Liquid glass", "זכוכית נוזלית"), K.liquid, Modifier.border(1.5.dp, K.accent, RoundedCornerShape(22.dp))) {
+            K.liquid = true; Prefs.setLiquidGlass(ctx, true)
+        }
+        Chip(T("Solid", "אחיד"), !K.liquid) { K.liquid = false; Prefs.setLiquidGlass(ctx, false) }
+    }
+    Text(
+        T("Liquid glass is the one we recommend.", "זכוכית נוזלית היא האפשרות המומלצת."),
+        fontSize = 11.sp, color = K.dim, modifier = Modifier.padding(horizontal = inset).padding(start = 2.dp, top = 6.dp),
+    )
 }
 
 @Composable
@@ -170,8 +218,7 @@ internal fun importError(e: Throwable): String =
 @Composable
 private fun ActionTile(modifier: Modifier, label: String, sub: String, onClick: () -> Unit) {
     Column(
-        modifier.clip(RoundedCornerShape(14.dp)).background(K.plate)
-            .border(1.dp, K.border, RoundedCornerShape(14.dp))
+        modifier.panel(14.dp)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = K.gap3, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -181,12 +228,34 @@ private fun ActionTile(modifier: Modifier, label: String, sub: String, onClick: 
     }
 }
 
+internal const val COFFEE_URL = "https://www.buymeacoffee.com/Noamm"
+internal const val REPO_URL = "https://github.com/${Updates.OWNER}/${Updates.REPO}"
+
 internal fun openLink(ctx: android.content.Context, url: String) {
     runCatching {
         ctx.startActivity(
             android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
         )
+    }
+}
+
+@Composable
+private fun ShieldGlyph(tint: Color, size: Dp = 18.dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width; val h = this.size.height; val sw = w * .09f
+        val shield = Path().apply {
+            moveTo(w * .5f, h * .08f)
+            lineTo(w * .86f, h * .24f)
+            lineTo(w * .86f, h * .52f)
+            cubicTo(w * .86f, h * .78f, w * .70f, h * .90f, w * .5f, h * .96f)
+            cubicTo(w * .30f, h * .90f, w * .14f, h * .78f, w * .14f, h * .52f)
+            lineTo(w * .14f, h * .24f)
+            close()
+        }
+        drawPath(shield, tint, style = Stroke(sw))
+        drawCircle(tint, w * .085f, Offset(w * .5f, h * .46f))
+        drawLine(tint, Offset(w * .5f, h * .46f), Offset(w * .5f, h * .66f), sw, StrokeCap.Round)
     }
 }
 
@@ -213,3 +282,4 @@ private fun Absent(title: String, desc: String) {
         }
     }
 }
+

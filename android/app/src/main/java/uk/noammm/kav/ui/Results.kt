@@ -150,21 +150,6 @@ private fun PlusGlyph(tint: Color = K.muted) {
 }
 
 @Composable
-private fun MapGlyph(tint: Color = K.muted) {
-    Canvas(Modifier.size(15.dp)) {
-        val w = size.width; val h = size.height; val sw = w * .09f
-        fun v(x: Float, y1: Float, y2: Float) =
-            drawLine(tint, Offset(w * x, h * y1), Offset(w * x, h * y2), sw, StrokeCap.Round)
-        fun seg(x1: Float, y1: Float, x2: Float, y2: Float) =
-            drawLine(tint, Offset(w * x1, h * y1), Offset(w * x2, h * y2), sw, StrokeCap.Round)
-        seg(.08f, .26f, .36f, .16f); seg(.36f, .16f, .64f, .30f); seg(.64f, .30f, .92f, .18f)
-        seg(.08f, .82f, .36f, .72f); seg(.36f, .72f, .64f, .86f); seg(.64f, .86f, .92f, .74f)
-        seg(.08f, .26f, .08f, .82f); seg(.92f, .18f, .92f, .74f)
-        v(.36f, .16f, .72f); v(.64f, .30f, .86f)
-    }
-}
-
-@Composable
 private fun Caret(tint: Color = K.muted) {
     Canvas(Modifier.size(10.dp)) {
         val w = size.width; val h = size.height
@@ -263,29 +248,27 @@ private fun Endpoint(label: String, here: Boolean, dot: Boolean, onClick: () -> 
 }
 
 @Composable
-fun DepartRow(label: String, onWhen: () -> Unit, onMap: (() -> Unit)?) {
+fun DepartRow(label: String, onWhen: () -> Unit, order: String, onOrder: () -> Unit) {
     Row(
         Modifier.fillMaxWidth()
             .padding(start = K.gap3, end = K.gap3, top = 2.dp, bottom = K.gap3),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(K.gap2),
     ) {
-        Row(
-            Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(999.dp)).background(K.plate)
-                .clickable(onClick = onWhen).padding(horizontal = 14.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(label, fontSize = 13.sp, color = K.text)
-            Spacer(Modifier.width(8.dp)); Caret()
-        }
-        Spacer(Modifier.weight(1f))
-        if (onMap != null) Row(
-            Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(999.dp)).background(K.plate)
-                .clickable(onClick = onMap).padding(horizontal = 14.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            MapGlyph(); Spacer(Modifier.width(7.dp))
-            Text(T("View", "תצוגה"), fontSize = 13.sp, color = K.text)
-        }
+        MenuPill(label, onWhen)
+        MenuPill(order, onOrder)
+    }
+}
+
+@Composable
+private fun MenuPill(label: String, onClick: () -> Unit) {
+    Row(
+        Modifier.heightIn(min = 44.dp).glassSurface(K.rPill)
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontSize = 13.sp, color = K.text)
+        Spacer(Modifier.width(8.dp)); Caret()
     }
 }
 
@@ -327,7 +310,7 @@ internal fun DepartureTimes(deps: List<Moovit.Departure>, now: Long) {
 internal fun PlatformTag(platform: String) {
     if (platform.isBlank()) return
     Row(
-        Modifier.clip(RoundedCornerShape(6.dp)).background(K.surface2)
+        Modifier.panel(6.dp)
             .padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -377,14 +360,13 @@ fun ItineraryCard(it: Moovit.Itinerary, r: Moovit.Resolved, onClick: (() -> Unit
     val now = System.currentTimeMillis() / 1000
     Row(
         Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(K.rCard))
-            .background(K.surface1)
+            .panel(K.rCard)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier),
         verticalAlignment = Alignment.Top,
     ) {
         Column(
             Modifier.widthIn(min = 108.dp).padding(7.dp)
-                .clip(RoundedCornerShape(13.dp)).background(K.sunken)
+                .clip(RoundedCornerShape(13.dp)).border(0.5.dp, K.text.copy(alpha = .14f), RoundedCornerShape(13.dp))
                 .padding(horizontal = 11.dp, vertical = K.gap3),
             verticalArrangement = Arrangement.Center,
         ) {
@@ -632,8 +614,7 @@ private fun cardChips(it: Moovit.Itinerary): List<Pair<String, String>> {
 private fun InfoChip(kind: String, label: String) {
     val co2 = kind == "co2"
     Row(
-        Modifier.clip(RoundedCornerShape(999.dp))
-            .background(if (co2) K.co2Pill else K.sunken)
+        Modifier.panel(999.dp)
             .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

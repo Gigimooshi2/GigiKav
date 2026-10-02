@@ -1,27 +1,25 @@
 package uk.noammm.kav.ui
 
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TimeInput
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -62,7 +60,7 @@ fun WhenSheet(
         is24Hour = true,
     )
 
-    Scrim(onDismiss) {
+    BottomSheet(onDismiss, scrolls = true) { close ->
         val chosen = mode
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -78,7 +76,7 @@ fun WhenSheet(
                 if (chosen == null) T("Close", "סגירה") else T("Back", "חזרה"),
                 fontSize = 14.sp, color = K.accent,
                 modifier = Modifier.clip(RoundedCornerShape(K.rPill))
-                    .clickable(role = Role.Button) { if (chosen == null) onDismiss() else mode = null }
+                    .clickable(role = Role.Button) { if (chosen == null) close(onDismiss) else mode = null }
                     .padding(horizontal = K.gap2, vertical = K.gap1),
             )
         }
@@ -87,17 +85,17 @@ fun WhenSheet(
         if (chosen == null) {
             WhenRow(T("Set departure time", "קביעת שעת יציאה")) { mode = Moovit.TIME_DEPARTURE }
             WhenRow(T("Set desired arrival time", "קביעת שעת הגעה רצויה")) { mode = Moovit.TIME_ARRIVAL }
-            WhenRow(T("Latest departure", "היציאה האחרונה")) { onPick(0L, Moovit.TIME_LAST) }
+            WhenRow(T("Latest departure", "היציאה האחרונה")) { close { onPick(0L, Moovit.TIME_LAST) } }
             val resettable = departAt > 0L || timeType == Moovit.TIME_LAST
             WhenRow(T("+15 min", "+15 דק'"), last = !resettable) {
-                onPick(System.currentTimeMillis() + 15 * 60_000L, Moovit.TIME_DEPARTURE)
+                close { onPick(System.currentTimeMillis() + 15 * 60_000L, Moovit.TIME_DEPARTURE) }
             }
-            if (resettable) WhenRow(T("Leave now", "צאו עכשיו"), tint = K.accent, last = true) { onNow() }
+            if (resettable) WhenRow(T("Leave now", "צאו עכשיו"), tint = K.accent, last = true) { close(onNow) }
         } else {
             TimeInput(picker)
             Spacer(Modifier.height(K.gap2))
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(K.rControl)).background(K.plate),
+                Modifier.fillMaxWidth().panel(K.rControl),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Step(T.backward, day > 0) { day-- }
@@ -117,10 +115,10 @@ fun WhenSheet(
             }
             Box(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    .clip(RoundedCornerShape(K.rControl)).background(K.plateStrong)
+                    .panel(K.rControl)
                     .clickable(role = Role.Button) {
                         val (ms, type) = clampDepart(picked, chosen, System.currentTimeMillis())
-                        onPick(ms, type)
+                        close { onPick(ms, type) }
                     },
                 contentAlignment = Alignment.Center,
             ) {
@@ -131,58 +129,36 @@ fun WhenSheet(
 }
 
 @Composable
-private fun Scrim(onDismiss: () -> Unit, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { shown = true }
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        androidx.compose.animation.AnimatedVisibility(
-            visible = shown,
-            enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(160)),
-            exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120)),
-        ) {
-            Box(
-                Modifier.fillMaxSize().background(Color.Black.copy(alpha = .55f))
-                    .clickable(onClick = onDismiss),
+fun ChoiceSheet(title: String, choices: List<String>, selected: Int, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
+    BottomSheet(onDismiss, scrolls = true) { close ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, fontSize = 17.sp, color = K.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(
+                T("Close", "סגירה"), fontSize = 14.sp, color = K.accent,
+                modifier = Modifier.clip(RoundedCornerShape(K.rPill))
+                    .clickable(role = Role.Button) { close(onDismiss) }
+                    .padding(horizontal = K.gap2, vertical = K.gap1),
             )
         }
-        androidx.compose.animation.AnimatedVisibility(
-            visible = shown,
-            enter = androidx.compose.animation.slideInVertically(
-                animationSpec = androidx.compose.animation.core.spring(
-                    dampingRatio = 0.9f,
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
-                ),
-                initialOffsetY = { it },
-            ),
-            exit = androidx.compose.animation.slideOutVertically(
-                animationSpec = androidx.compose.animation.core.tween(160),
-                targetOffsetY = { it },
-            ),
-        ) {
-            Column(
-                Modifier.fillMaxWidth()
-                    .padding(bottom = maxOf(bottomCover(), LocalBottomBarInset.current))
-                    .padding(K.gap3)
-                    .clip(RoundedCornerShape(K.rCard)).background(K.surface1)
-                    .clickable(enabled = false) {}
-                    .verticalScroll(rememberScrollState())
-                    .padding(K.gap4)
-                    .animateContentSize(),
-                content = content,
-            )
+        Spacer(Modifier.height(K.gap3))
+        choices.forEachIndexed { i, label ->
+            WhenRow(label, tint = if (i == selected) K.accent else K.text, last = i == choices.lastIndex, checked = i == selected) {
+                close { onPick(i) }
+            }
         }
     }
 }
 
 @Composable
-private fun WhenRow(label: String, tint: Color = K.text, last: Boolean = false, onClick: () -> Unit) {
+private fun WhenRow(label: String, tint: Color = K.text, last: Boolean = false, checked: Boolean = false, onClick: () -> Unit) {
     Column {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 52.dp)
                 .clickable(role = Role.Button, onClick = onClick),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(label, fontSize = 15.sp, color = tint)
+            Text(label, fontSize = 15.sp, color = tint, modifier = Modifier.weight(1f))
+            if (checked) Icon(Icons.Rounded.Check, contentDescription = null, tint = K.accent, modifier = Modifier.size(18.dp))
         }
         if (!last) Box(Modifier.fillMaxWidth().height(1.dp).background(K.border))
     }

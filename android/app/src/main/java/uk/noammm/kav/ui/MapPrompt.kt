@@ -25,7 +25,7 @@ fun MapPrompt() {
     val ctx = LocalContext.current
     Dialog(onDismissRequest = { dismissed = true }) {
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(K.rCard)).background(K.surface1).padding(K.gap5),
+            Modifier.fillMaxWidth().panel(K.rCard, solid = true).padding(K.gap5),
             verticalArrangement = Arrangement.spacedBy(K.gap4),
         ) {
             Text(T("Download the map", "הורדת המפה"), fontSize = 20.sp, color = K.text, fontWeight = FontWeight.SemiBold)
@@ -53,7 +53,7 @@ fun MapPrompt() {
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
                 Box(
-                    Modifier.weight(1f).heightIn(min = 46.dp).clip(RoundedCornerShape(K.rPill)).background(K.plateStrong)
+                    Modifier.weight(1f).heightIn(min = 46.dp).panel(K.rPill)
                         .clickable(role = Role.Button) { dismissed = true },
                     contentAlignment = Alignment.Center,
                 ) { Text(T("Later", "אחר כך"), fontSize = 15.sp, color = K.text) }
@@ -70,7 +70,7 @@ fun MapPrompt() {
                             state is MapFile.State.Failed -> T("Try again", "נסו שוב")
                             else -> T("Download", "הורדה")
                         },
-                        fontSize = 15.sp, color = if (busy) K.muted else K.bg, fontWeight = FontWeight.Medium,
+                        fontSize = 15.sp, color = if (busy) K.muted else K.onAccent, fontWeight = FontWeight.Medium,
                     )
                 }
             }

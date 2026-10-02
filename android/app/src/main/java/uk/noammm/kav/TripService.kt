@@ -6,28 +6,30 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
+import android.location.Location
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.widget.RemoteViews
+import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import uk.noammm.kav.data.JourneyFile
+import uk.noammm.kav.ui.Fix
 import uk.noammm.kav.ui.T
 import uk.noammm.kav.ui.buildSteps
 import uk.noammm.kav.ui.journeyProgress
-import uk.noammm.kav.ui.stepInstruction
 
 class TripService : Service() {
 
-    private var pushedTitle: String? = null
-    private var pushedText: String? = null
-    private var pushedStep = -1
-    private var pushedAt = 0L
-
-    private var offset = 0
+    private var foreground = false
+    private var tracking: (() -> Unit)? = null
+    private var fix: Fix? = null
+    private var shown: TripNotice? = null
+    private var postedAt = 0L
 
     private var cached: Pair<ActiveJourney, Int>? = null
     private var cachedAt = -1L
@@ -35,70 +37,110 @@ class TripService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
         override fun run() {
-            if (System.currentTimeMillis() - pushedAt > 45_000) {
-                val (journey, step) = journey() ?: run { finish(); return }
-                val steps = buildSteps(journey.trip, journey.fromLabel, journey.toLabel)
-                val moved = journeyProgress(
-                    steps, step, journey.resolved, journey.chosen,
-                    System.currentTimeMillis() / 1000, null,
-                )
-                if (moved != step) {
-                    JourneyFile.save(this@TripService, journey, moved)
-                    cached = journey to moved
-                    cachedAt = JourneyFile.mtime(this@TripService)
-                    offset = 0
-                }
-                post()
-            }
-            handler.postDelayed(this, 30_000)
+            advance()
+            post()
+            handler.postDelayed(this, TICK_MS)
         }
     }
+    private val settle = Runnable { post() }
 
     override fun onBind(intent: Intent?) = null
 
     override fun onCreate() {
         super.onCreate()
         T.lang = Prefs.lang(this)
+        ensureChannel(this)
+        running = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACT_PREV -> page(-1)
-            ACT_NEXT -> page(+1)
-            ACT_END -> { end(); return START_NOT_STICKY }
-            else -> if (intent?.hasExtra(TITLE) == true) {
-                pushedTitle = intent.getStringExtra(TITLE)
-                pushedText = intent.getStringExtra(TEXT)
-                val step = intent.getIntExtra(STEP, -1)
-                if (step != pushedStep) { pushedStep = step; offset = 0 }
-                pushedAt = System.currentTimeMillis()
-            }
-        }
-        if (pushedTitle == null && journey() == null) { finish(); return START_NOT_STICKY }
-        post()
+        if (intent?.action == ACT_END) { end(); return START_NOT_STICKY }
+        if (intent?.action == ACT_REPOST) shown = null
+        if (!foreground && !goForeground()) { stopSelf(); return START_NOT_STICKY }
+        if (journey() == null) { finish(); return START_NOT_STICKY }
+        post(force = true)
         handler.removeCallbacks(tick)
-        handler.postDelayed(tick, 30_000)
+        handler.postDelayed(tick, TICK_MS)
         return START_STICKY
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(tick)
+        handler.removeCallbacksAndMessages(null)
+        tracking?.invoke()
+        tracking = null
+        if (running === this) running = null
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
+    private fun goForeground(): Boolean {
+        val first = notice()?.let { build(this, it) } ?: NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_trip_notice)
+            .setContentTitle(getString(R.string.app_name))
+            .build()
+        val special = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+        val located = hasLocationPermission(this) &&
+            start(first, special or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        if (!located && !start(first, special)) return false
+        foreground = true
+        if (located) tracking = trackLocation(this, ::onFix)
+        return true
+    }
+
+    private fun start(n: Notification, types: Int) = try {
+        ServiceCompat.startForeground(this, ID, n, types)
+        true
+    } catch (e: RuntimeException) {
+        false
+    }
+
+    private fun onFix(location: Location) {
+        if (location.provider == "cached") return
+        val f = Fix(location.latitude, location.longitude, System.currentTimeMillis() / 1000, location.speed)
+        fix = f
+        val shell = TripBridge.fix
+        if (shell != null) shell(f) else advance()
+        post()
+    }
+
     private fun journey(): Pair<ActiveJourney, Int>? {
+        TripBridge.journey?.let { return it() }
         val at = JourneyFile.mtime(this)
         if (at != cachedAt) { cached = JourneyFile.load(this); cachedAt = at }
         return cached
     }
 
-    private fun page(d: Int) {
-        val (journey, saved) = journey() ?: return
+    private fun advance() {
+        if (TripBridge.journey != null) return
+        val (journey, step) = journey() ?: return
         val steps = buildSteps(journey.trip, journey.fromLabel, journey.toLabel)
-        if (steps.isEmpty()) return
-        val current = (if (pushedStep >= 0) pushedStep else saved).coerceIn(0, steps.lastIndex)
-        offset = (current + offset + d).coerceIn(0, steps.lastIndex) - current
+        val moved = journeyProgress(
+            steps, step, journey.resolved, journey.chosen, System.currentTimeMillis() / 1000, fix,
+        )
+        if (moved == step) return
+        JourneyFile.save(this, journey, moved)
+        cached = journey to moved
+        cachedAt = JourneyFile.mtime(this)
+    }
+
+    private fun notice(): TripNotice? {
+        val (journey, step) = journey() ?: return null
+        return tripNotice(journey, step, fix, System.currentTimeMillis() / 1000, Prefs.accent(this))
+    }
+
+    private fun post(force: Boolean = false) {
+        if (!foreground) return
+        val wait = MIN_GAP_MS - (System.currentTimeMillis() - postedAt)
+        if (!force && wait > 0) {
+            handler.removeCallbacks(settle)
+            handler.postDelayed(settle, wait)
+            return
+        }
+        val n = notice() ?: run { finish(); return }
+        if (n == shown) return
+        shown = n
+        postedAt = System.currentTimeMillis()
+        runCatching { NotificationManagerCompat.from(this).notify(ID, build(this, n)) }
     }
 
     private fun end() {
@@ -111,42 +153,22 @@ class TripService : Service() {
         stopSelf()
     }
 
-    private fun content(): Pair<String, String> {
-        val fallback = (pushedTitle ?: getString(R.string.app_name)) to pushedText.orEmpty()
-        if (offset == 0 && pushedTitle != null && System.currentTimeMillis() - pushedAt < 90_000) return fallback
-        val (journey, saved) = journey() ?: return fallback
-        val steps = buildSteps(journey.trip, journey.fromLabel, journey.toLabel)
-        if (steps.isEmpty()) return fallback
-        val current = (if (pushedStep >= 0) pushedStep else saved).coerceIn(0, steps.lastIndex)
-        val shown = (current + offset).coerceIn(0, steps.lastIndex)
-        return stepInstruction(steps[shown], journey, shown == steps.lastIndex - 1, System.currentTimeMillis() / 1000)
-    }
-
-    private fun post() {
-        val (title, text) = content()
-        ServiceCompat.startForeground(
-            this, ID, build(this, title, text),
-            if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0,
-        )
-    }
-
     companion object {
         private const val ID = 7
         private const val ALERT_ID = 8
         private const val CHANNEL = "navigation"
-        private const val TITLE = "title"
-        private const val TEXT = "text"
-        private const val STEP = "step"
-        private const val ACT_PREV = "uk.noammm.kav.step.PREV"
-        private const val ACT_NEXT = "uk.noammm.kav.step.NEXT"
         private const val ACT_END = "uk.noammm.kav.trip.END"
         private const val ACT_REPOST = "uk.noammm.kav.trip.REPOST"
+        private const val PROMOTED = "android.requestPromotedOngoing"
+        private const val TICK_MS = 15_000L
+        private const val MIN_GAP_MS = 2_000L
 
-        fun show(ctx: Context, title: String, text: String, step: Int) {
+        private var running: TripService? = null
+
+        fun show(ctx: Context) {
+            running?.let { it.post(); return }
             if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
-            val intent = Intent(ctx, TripService::class.java)
-                .putExtra(TITLE, title).putExtra(TEXT, text).putExtra(STEP, step)
-            runCatching { ctx.startForegroundService(intent) }
+            runCatching { ctx.startForegroundService(Intent(ctx, TripService::class.java)) }
         }
 
         fun stop(ctx: Context) {
@@ -192,29 +214,48 @@ class TripService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        private fun build(ctx: Context, title: String, text: String): Notification {
-            ensureChannel(ctx)
+        private fun build(ctx: Context, n: TripNotice): Notification {
             val accent = Prefs.accent(ctx)
-            fun rv(layout: Int) = RemoteViews(ctx.packageName, layout).apply {
-                setTextViewText(R.id.notice_title, title)
-                setTextViewText(R.id.notice_text, text)
-                setInt(R.id.notice_prev, "setColorFilter", accent)
-                setInt(R.id.notice_next, "setColorFilter", accent)
-                setOnClickPendingIntent(R.id.notice_prev, act(ctx, ACT_PREV))
-                setOnClickPendingIntent(R.id.notice_next, act(ctx, ACT_NEXT))
-            }
-            val expanded = rv(R.layout.notification_trip_expanded).apply {
-                setTextViewText(R.id.notice_end, T("End trip", "סיום נסיעה"))
-                setTextColor(R.id.notice_end, accent)
-                setOnClickPendingIntent(R.id.notice_end, act(ctx, ACT_END))
-            }
-            return NotificationCompat.Builder(ctx, CHANNEL)
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) live(ctx, n, accent) else compat(ctx, n, accent)
+        }
+
+        @RequiresApi(Build.VERSION_CODES.BAKLAVA)
+        private fun live(ctx: Context, n: TripNotice, accent: Int): Notification {
+            val style = Notification.ProgressStyle()
+                .setStyledByProgress(false)
+                .setProgressSegments(n.parts.map { (length, colour) -> Notification.ProgressStyle.Segment(length).setColor(colour) })
+                .setProgress(n.progress)
+                .setProgressTrackerIcon(Icon.createWithBitmap(trackerIcon(n.glyph, n.tint)))
+            return Notification.Builder(ctx, CHANNEL)
                 .setSmallIcon(R.drawable.ic_trip_notice)
-                .setContentTitle(title)
-                .setContentText(text)
-                .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-                .setCustomContentView(rv(R.layout.notification_trip_collapsed))
-                .setCustomBigContentView(expanded)
+                .setContentTitle(n.title)
+                .setContentText(n.text)
+                .setSubText(n.arrive)
+                .setLargeIcon(Icon.createWithBitmap(plateIcon(n.glyph, n.tint)))
+                .setStyle(style)
+                .setShortCriticalText(n.chip)
+                .addAction(Notification.Action.Builder(null as Icon?, T("End trip", "סיום נסיעה"), act(ctx, ACT_END)).build())
+                .setContentIntent(openApp(ctx))
+                .setDeleteIntent(act(ctx, ACT_REPOST))
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .setColor(accent)
+                .setCategory(Notification.CATEGORY_NAVIGATION)
+                .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+                .addExtras(Bundle().apply { putBoolean(PROMOTED, true) })
+                .build()
+        }
+
+        private fun compat(ctx: Context, n: TripNotice, accent: Int): Notification =
+            NotificationCompat.Builder(ctx, CHANNEL)
+                .setSmallIcon(R.drawable.ic_trip_notice)
+                .setContentTitle(n.title)
+                .setContentText(n.text)
+                .setSubText(n.arrive)
+                .setLargeIcon(plateIcon(n.glyph, n.tint))
+                .setProgress(n.max, n.progress, false)
+                .addAction(0, T("End trip", "סיום נסיעה"), act(ctx, ACT_END))
                 .setContentIntent(openApp(ctx))
                 .setDeleteIntent(act(ctx, ACT_REPOST))
                 .setOngoing(true)
@@ -224,10 +265,11 @@ class TripService : Service() {
                 .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 .build()
-        }
     }
 }
 
 object TripBridge {
     @Volatile var end: (() -> Unit)? = null
+    @Volatile var journey: (() -> Pair<ActiveJourney, Int>?)? = null
+    @Volatile var fix: ((Fix) -> Unit)? = null
 }

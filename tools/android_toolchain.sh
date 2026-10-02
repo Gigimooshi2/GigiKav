@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$HOME/Android"; SDK="$ROOT/Sdk"; JDK="$ROOT/jdk"
-API=35
+API=36
 BUILD_TOOLS=35.0.0
 
 mkdir -p "$ROOT"

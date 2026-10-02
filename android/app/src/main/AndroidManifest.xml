@@ -19,14 +19,14 @@
          Android asks you once, per app, before it will take an APK from one. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <!-- A trip under way lives in the shade as an ongoing notification, and the
-         service behind it keeps the process up so the live times in it stay true
-         while the app is away. "Special use" is the honest type: the system's
-         named categories are about location and media, and this is neither — it
-         tracks nothing, it holds a ride open. -->
+    <!-- A trip under way lives in the shade as an ongoing notification. Its service
+         follows your location so the steps move with the phone, "special use" keeps it
+         up when location isn't granted, and Android 16 shows it as a live update. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
     <!-- Deliberately NOT declared, and why each one is refused:
            ADVERTISING_ID            - there is no advertising
@@ -77,7 +77,7 @@
                  dot, so a name with dots in it needs one line per dot; three covers
                  anything a rider is likely to have renamed a backup to. A file
                  manager that hands over a content:// URI carrying no name in its
-                 path cannot be matched this way at all — Settings › Import is the
+                 path cannot be matched this way at all. Settings › Import is the
                  way in for those. -->
             <intent-filter android:label="@string/app_name">
                 <action android:name="android.intent.action.VIEW" />
@@ -109,11 +109,11 @@
             </intent-filter>
         </activity>
 
-        <!-- the ongoing trip notification's anchor; it holds the process and nothing else -->
+        <!-- the ongoing trip notification's anchor -->
         <service
             android:name=".TripService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="location|specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="ongoing transit trip status" />

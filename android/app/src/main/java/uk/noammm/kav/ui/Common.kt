@@ -18,11 +18,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.text.HtmlCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -126,17 +132,19 @@ fun modeName(m: Mode): String = when (m) {
 
 @Composable
 fun WalkGlyph(tint: Color = K.dim, size: androidx.compose.ui.unit.Dp = 13.dp) {
-    Canvas(Modifier.size(size)) {
-        val w = this.size.width; val h = this.size.height
-        val sw = w * 0.11f
-        fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
-            drawLine(tint, Offset(x1 * w, y1 * h), Offset(x2 * w, y2 * h), sw, StrokeCap.Round)
-        drawCircle(tint, radius = w * .12f, center = Offset(w * .52f, h * .14f))
-        line(.52f, .28f, .48f, .56f)
-        line(.48f, .56f, .34f, .88f)
-        line(.48f, .56f, .66f, .84f)
-        line(.52f, .36f, .72f, .46f)
-    }
+    Canvas(Modifier.size(size)) { drawWalker(tint) }
+}
+
+fun DrawScope.drawWalker(tint: Color) {
+    val w = size.width; val h = size.height
+    val sw = w * 0.11f
+    fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
+        drawLine(tint, Offset(x1 * w, y1 * h), Offset(x2 * w, y2 * h), sw, StrokeCap.Round)
+    drawCircle(tint, radius = w * .12f, center = Offset(w * .52f, h * .14f))
+    line(.52f, .28f, .48f, .56f)
+    line(.48f, .56f, .34f, .88f)
+    line(.48f, .56f, .66f, .84f)
+    line(.52f, .36f, .72f, .46f)
 }
 
 @Composable
@@ -295,8 +303,7 @@ fun PreciseLocationNudge() {
     if (!uk.noammm.kav.hasLocationPermission(ctx)) return
     Row(
         Modifier.padding(horizontal = K.gap3, vertical = K.gap2).fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp)).background(K.plate)
-            .border(1.dp, K.border, RoundedCornerShape(12.dp))
+            .panel(12.dp)
             .padding(K.gap3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -316,7 +323,7 @@ fun PreciseLocationNudge() {
         Spacer(Modifier.width(K.gap3))
         Text(
             T("Change settings", "שינוי הגדרות"), fontSize = 12.sp, color = K.text,
-            modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(K.plateStrong)
+            modifier = Modifier.panel(999.dp)
                 .clickable {
                     runCatching {
                         ctx.startActivity(
@@ -381,86 +388,100 @@ fun ServiceAlertSheet(groupId: Int, fallbackLabel: String, onDismiss: () -> Unit
             .onSuccess { alerts = it }
             .onFailure { failed = true }
     }
-    var shown by remember(groupId) { mutableStateOf(false) }
-    LaunchedEffect(groupId) { shown = true }
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        androidx.compose.animation.AnimatedVisibility(
-            visible = shown,
-            enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(160)),
-            exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120)),
-        ) {
-            Box(
-                Modifier.fillMaxSize().background(Color.Black.copy(alpha = .55f))
-                    .clickable(onClick = onDismiss),
+    BottomSheet(onDismiss) { close ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                fallbackLabel.ifBlank { T("Service alert", "הודעת שירות") },
+                fontSize = 17.sp, color = K.text, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                T("Close", "סגירה"), fontSize = 14.sp, color = K.accent,
+                modifier = Modifier.clip(RoundedCornerShape(K.rPill))
+                    .clickable(role = Role.Button) { close(onDismiss) }
+                    .padding(horizontal = K.gap2, vertical = K.gap1),
             )
         }
-        androidx.compose.animation.AnimatedVisibility(
-            visible = shown,
-            enter = androidx.compose.animation.slideInVertically(
-                animationSpec = androidx.compose.animation.core.spring(
-                    dampingRatio = 0.9f,
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
-                ),
-                initialOffsetY = { it },
-            ),
-            exit = androidx.compose.animation.slideOutVertically(
-                animationSpec = androidx.compose.animation.core.tween(160),
-                targetOffsetY = { it },
-            ),
-        ) {
-        Column(
-            Modifier.fillMaxWidth()
-                .padding(bottom = maxOf(bottomCover(), LocalBottomBarInset.current))
-                .padding(K.gap3)
-                .clip(RoundedCornerShape(K.rCard)).background(K.surface1)
-                .clickable(enabled = false) {}
-                .padding(K.gap4)
-                .animateContentSize(),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+        val list = alerts
+        when {
+            list == null && !failed ->
+                LoadingPulse(T("Fetching the notice", "מביאים את ההודעה"), Modifier.fillMaxWidth().padding(top = K.gap4, bottom = K.gap2))
+            failed || list.isNullOrEmpty() ->
                 Text(
-                    fallbackLabel.ifBlank { T("Service alert", "הודעת שירות") },
-                    fontSize = 17.sp, color = K.text, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
+                    T("The operator published no further detail for this alert.", "המפעיל לא פרסם פרטים נוספים על הודעה זו."),
+                    fontSize = 14.sp, color = K.muted, modifier = Modifier.padding(top = K.gap3),
                 )
-                Text(
-                    T("Close", "סגירה"), fontSize = 14.sp, color = K.accent,
-                    modifier = Modifier.clip(RoundedCornerShape(K.rPill))
-                        .clickable(role = Role.Button, onClick = onDismiss)
-                        .padding(horizontal = K.gap2, vertical = K.gap1),
-                )
-            }
-            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
-            val list = alerts
-            when {
-                list == null && !failed ->
-                    LoadingPulse(T("Fetching the notice", "מביאים את ההודעה"), Modifier.fillMaxWidth().padding(top = K.gap4, bottom = K.gap2))
-                failed || list.isNullOrEmpty() ->
-                    Text(
-                        T("The operator published no further detail for this alert.", "המפעיל לא פרסם פרטים נוספים על הודעה זו."),
-                        fontSize = 14.sp, color = K.muted, modifier = Modifier.padding(top = K.gap3),
-                    )
-                else -> list.forEachIndexed { i, a ->
-                    if (i > 0) {
-                        Spacer(Modifier.height(K.gap3))
-                        Box(Modifier.fillMaxWidth().height(1.dp).background(K.border))
-                    }
+            else -> list.forEachIndexed { i, a ->
+                if (i > 0) {
                     Spacer(Modifier.height(K.gap3))
-                    a.title.takeIf { it.isNotBlank() }?.let {
-                        Text(it, fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(K.gap2))
-                    }
-                    alertWindow(a)?.let {
-                        Text(it, fontSize = 12.sp, color = K.dim)
-                        Spacer(Modifier.height(K.gap2))
-                    }
-                    alertText(a)?.let {
-                        Text(it, fontSize = 14.sp, color = K.muted, lineHeight = 20.sp)
-                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(K.border))
+                }
+                Spacer(Modifier.height(K.gap3))
+                a.title.takeIf { it.isNotBlank() }?.let {
+                    Text(it, fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(K.gap2))
+                }
+                alertWindow(a)?.let {
+                    Text(it, fontSize = 12.sp, color = K.dim)
+                    Spacer(Modifier.height(K.gap2))
+                }
+                alertText(a)?.let {
+                    Text(it, fontSize = 14.sp, color = K.muted, lineHeight = 20.sp)
                 }
             }
-            }
         }
+        }
+    }
+}
+
+@Composable
+fun BottomSheet(
+    onDismiss: () -> Unit,
+    scrolls: Boolean = false,
+    content: @Composable ColumnScope.(close: (then: () -> Unit) -> Unit) -> Unit,
+) {
+    val state = remember { androidx.compose.animation.core.MutableTransitionState(false).apply { targetState = true } }
+    var after by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val close: (() -> Unit) -> Unit = { then -> if (after == null) { after = then; state.targetState = false } }
+    androidx.activity.compose.BackHandler { close(onDismiss) }
+    if (state.isIdle && !state.currentState) LaunchedEffect(Unit) { after?.invoke() }
+    androidx.compose.animation.AnimatedVisibility(
+        state,
+        enter = androidx.compose.animation.EnterTransition.None,
+        exit = androidx.compose.animation.ExitTransition.None,
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+            Box(
+                Modifier.fillMaxSize()
+                    .animateEnterExit(
+                        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(160)),
+                        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(200)),
+                    )
+                    .background(Color.Black.copy(alpha = .55f))
+                    .clickable { close(onDismiss) },
+            )
+            Column(
+                Modifier.fillMaxWidth()
+                    .animateEnterExit(
+                        enter = androidx.compose.animation.slideInVertically(
+                            androidx.compose.animation.core.spring(
+                                dampingRatio = 0.9f,
+                                stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
+                            ),
+                        ) { it },
+                        exit = androidx.compose.animation.slideOutVertically(
+                            androidx.compose.animation.core.tween(220, easing = androidx.compose.animation.core.FastOutLinearInEasing),
+                        ) { it },
+                    )
+                    .padding(bottom = maxOf(bottomCover(), LocalBottomBarInset.current))
+                    .padding(K.gap3)
+                    .panel(K.rCard, solid = true)
+                    .clickable(enabled = false) {}
+                    .then(if (scrolls) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+                    .padding(K.gap4)
+                    .animateContentSize(),
+            ) { content(close) }
         }
     }
 }
@@ -469,7 +490,7 @@ private fun alertWindow(a: Moovit.ServiceAlert): String? {
     val day = java.text.SimpleDateFormat("d MMM", T.locale)
     fun at(t: Long) = day.format(java.util.Date(t * 1000))
     return when {
-        a.activeFrom > 0 && a.activeTo > 0 -> "${at(a.activeFrom)} – ${at(a.activeTo)}"
+        a.activeFrom > 0 && a.activeTo > 0 -> T("${at(a.activeFrom)} to ${at(a.activeTo)}", "${at(a.activeFrom)} עד ${at(a.activeTo)}")
         a.activeFrom > 0 -> T("From ${at(a.activeFrom)}", "מ-${at(a.activeFrom)}")
         a.activeTo > 0 -> T("Until ${at(a.activeTo)}", "עד ${at(a.activeTo)}")
         else -> null
@@ -481,4 +502,32 @@ private fun alertText(a: Moovit.ServiceAlert): String? {
     if (!a.html && !raw.contains('<')) return raw.trim()
     return HtmlCompat.fromHtml(raw, HtmlCompat.FROM_HTML_MODE_COMPACT)
         .toString().replace(Regex("\n{3,}"), "\n\n").trim().ifBlank { null }
+}
+
+@Composable
+internal fun StopGlyphOrPhoto(stopId: Int, mode: Mode?, thumb: Dp = 40.dp, mark: Dp = 17.dp) {
+    var bmp by remember(stopId) { mutableStateOf(StopPhotos.thumbNow(stopId)) }
+    LaunchedEffect(stopId) { if (bmp == null && stopId > 0) bmp = StopPhotos.thumb(stopId) }
+    val shot = bmp
+    if (shot == null) {
+        if (mode != null) StationMark(mode, mark)
+        return
+    }
+    var open by remember { mutableStateOf(false) }
+    Image(
+        shot.asImageBitmap(), T("A photo of the stop", "תמונה של התחנה"),
+        Modifier.size(thumb).clip(RoundedCornerShape(10.dp)).clickable { open = true },
+        contentScale = ContentScale.Crop,
+    )
+    if (open) {
+        var full by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+        LaunchedEffect(stopId) { full = StopPhotos.full(stopId) }
+        Dialog(onDismissRequest = { open = false }) {
+            Image(
+                (full ?: shot).asImageBitmap(), null,
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { open = false },
+                contentScale = ContentScale.FillWidth,
+            )
+        }
+    }
 }

@@ -22,3 +22,6 @@ tools/moovit_probe.py
 tools/recover_thrift.sh
 tools/serve.py
 tools/thrift_from_jadx.py
+
+# Tests
+android/app/src/androidTest/

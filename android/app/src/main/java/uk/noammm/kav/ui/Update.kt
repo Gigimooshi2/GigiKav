@@ -2,6 +2,7 @@ package uk.noammm.kav.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -33,7 +34,7 @@ fun UpdatePrompt(model: KavModel) {
     val scope = rememberCoroutineScope()
     Dialog(onDismissRequest = { model.updateDismissed = true }) {
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(K.rCard)).background(K.surface1).padding(K.gap5),
+            Modifier.fillMaxWidth().panel(K.rCard, solid = true).padding(K.gap5),
             verticalArrangement = Arrangement.spacedBy(K.gap4),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(K.gap4)) {
@@ -50,7 +51,7 @@ fun UpdatePrompt(model: KavModel) {
             UpdateProgress(model)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
                 Box(
-                    Modifier.weight(1f).heightIn(min = 46.dp).clip(RoundedCornerShape(K.rPill)).background(K.plateStrong)
+                    Modifier.weight(1f).heightIn(min = 46.dp).panel(K.rPill)
                         .clickable(role = Role.Button) { model.updateDismissed = true },
                     contentAlignment = Alignment.Center,
                 ) { Text(T("No", "לא"), fontSize = 15.sp, color = K.text) }
@@ -77,7 +78,7 @@ private fun AppIcon(size: androidx.compose.ui.unit.Dp) {
 private fun ReleaseNotes(release: Updates.Release, maxHeight: androidx.compose.ui.unit.Dp) {
     val notes = release.notes.trim().ifBlank { release.name.ifBlank { T("No release notes.", "אין מה חדש.") } }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.sunken)
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).border(0.5.dp, K.text.copy(alpha = .14f), RoundedCornerShape(14.dp))
             .heightIn(max = maxHeight).verticalScroll(rememberScrollState()).padding(K.gap3),
     ) {
         Text(notes, fontSize = 13.sp, color = K.muted, lineHeight = 19.sp)
@@ -112,7 +113,7 @@ private fun UpdateButton(model: KavModel, modifier: Modifier = Modifier, onClick
     ) {
         Text(
             if (busy) T("Updating…", "מעדכנים…") else T("Update", "עדכון"), fontSize = 15.sp,
-            color = if (busy) K.muted else K.bg, fontWeight = FontWeight.Medium,
+            color = if (busy) K.muted else K.onAccent, fontWeight = FontWeight.Medium,
         )
     }
 }
@@ -124,7 +125,7 @@ fun UpdateSection(model: KavModel) {
     val release = model.update
     var checking by remember { mutableStateOf(false) }
     Column(
-        Modifier.padding(horizontal = K.gap3).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.plate)
+        Modifier.padding(horizontal = K.gap3).fillMaxWidth().panel(14.dp)
             .padding(K.gap3),
         verticalArrangement = Arrangement.spacedBy(K.gap3),
     ) {

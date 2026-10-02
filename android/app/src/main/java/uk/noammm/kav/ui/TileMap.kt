@@ -4,7 +4,6 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -20,9 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
@@ -38,6 +35,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import org.maplibre.android.MapLibre
@@ -96,18 +94,26 @@ data class MapMarker(
     val icon: String,
     val rotation: Float = 0f,
     val alpha: Float = 1f,
+    val bottom: Boolean = false,
+    val turns: Boolean = false,
 )
 
+// Drawn by the map itself, so it moves with the map. Markers stay upright unless they turn.
 data class MapGeometry(
     val lines: List<MapLine> = emptyList(),
     val dots: List<MapDot> = emptyList(),
     val markers: List<MapMarker> = emptyList(),
+    val halos: List<MapDot> = emptyList(),
+    val images: Map<String, ImageBitmap> = emptyMap(),
 )
 
 private const val SRC_LINES = "kav-lines"
 private const val SRC_DOTS = "kav-dots"
+private const val SRC_MARKS = "kav-marks"
+private const val SRC_LIVE_HALOS = "kav-live-halos"
 private const val SRC_LIVE_DOTS = "kav-live-dots"
 private const val SRC_LIVE_MARKS = "kav-live-marks"
+private const val HALO_LAYER = "kav-live-halo"
 
 const val MAP_ARROW_ICON = "kav-arrow"
 
@@ -118,6 +124,8 @@ private fun Style.ensureKavLayers() {
     if (getSource(SRC_LINES) != null) return
     addSource(GeoJsonSource(SRC_LINES))
     addSource(GeoJsonSource(SRC_DOTS))
+    addSource(GeoJsonSource(SRC_MARKS))
+    addSource(GeoJsonSource(SRC_LIVE_HALOS))
     addSource(GeoJsonSource(SRC_LIVE_DOTS))
     addSource(GeoJsonSource(SRC_LIVE_MARKS))
     val colour = Expression.toColor(Expression.get("colour"))
@@ -149,6 +157,11 @@ private fun Style.ensureKavLayers() {
         PropertyFactory.circleStrokeWidth(Expression.toNumber(Expression.get("strokeWidth"))),
         PropertyFactory.circleSortKey(sort),
     ))
+    addLayer(markLayer("kav-mark", SRC_MARKS, turns = false))
+    addLayer(CircleLayer(HALO_LAYER, SRC_LIVE_HALOS).withProperties(
+        PropertyFactory.circleColor(colour),
+        PropertyFactory.circleRadius(Expression.toNumber(Expression.get("r"))),
+    ))
     addLayer(CircleLayer("kav-live-dot", SRC_LIVE_DOTS).withProperties(
         PropertyFactory.circleColor(colour),
         PropertyFactory.circleRadius(Expression.toNumber(Expression.get("r"))),
@@ -156,21 +169,42 @@ private fun Style.ensureKavLayers() {
         PropertyFactory.circleStrokeWidth(Expression.toNumber(Expression.get("strokeWidth"))),
         PropertyFactory.circleSortKey(sort),
     ))
-    addLayer(SymbolLayer("kav-live-mark", SRC_LIVE_MARKS).withProperties(
-        PropertyFactory.iconImage(Expression.get("icon")),
-        PropertyFactory.iconRotate(Expression.toNumber(Expression.get("rot"))),
-        PropertyFactory.iconOpacity(Expression.toNumber(Expression.get("alpha"))),
-        PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
-        PropertyFactory.iconAllowOverlap(true),
-        PropertyFactory.iconIgnorePlacement(true),
-    ))
+    addLayer(markLayer("kav-live-mark", SRC_LIVE_MARKS, turns = false))
+    addLayer(markLayer("kav-live-turn", SRC_LIVE_MARKS, turns = true))
+}
+
+private fun markLayer(id: String, source: String, turns: Boolean) = SymbolLayer(id, source).withProperties(
+    PropertyFactory.iconImage(Expression.get("icon")),
+    PropertyFactory.iconRotate(Expression.toNumber(Expression.get("rot"))),
+    PropertyFactory.iconOpacity(Expression.toNumber(Expression.get("alpha"))),
+    PropertyFactory.iconAnchor(Expression.get("anchor")),
+    PropertyFactory.iconRotationAlignment(
+        if (turns) Property.ICON_ROTATION_ALIGNMENT_MAP else Property.ICON_ROTATION_ALIGNMENT_VIEWPORT,
+    ),
+    PropertyFactory.iconAllowOverlap(true),
+    PropertyFactory.iconIgnorePlacement(true),
+).withFilter(Expression.eq(Expression.get("turns"), Expression.literal(turns)))
+
+private fun Style.addKavImages(images: Map<String, ImageBitmap>) {
+    for ((name, image) in images) if (getImage(name) == null) addImage(name, image.asAndroidBitmap())
+}
+
+private fun markFeatures(marks: List<MapMarker>): List<Feature> = marks.map { m ->
+    Feature.fromGeometry(Point.fromLngLat(m.lon, m.lat)).apply {
+        addStringProperty("icon", m.icon)
+        addNumberProperty("rot", m.rotation)
+        addNumberProperty("alpha", m.alpha)
+        addStringProperty("anchor", if (m.bottom) "bottom" else "center")
+        addBooleanProperty("turns", m.turns)
+    }
 }
 
 private fun Style.setKavGeometry(g: MapGeometry) {
+    addKavImages(g.images)
     val lines = g.lines.filter { it.points.size >= 2 }.mapIndexed { i, l ->
         Feature.fromGeometry(LineString.fromLngLats(l.points.map { Point.fromLngLat(it.second, it.first) })).apply {
             addStringProperty("colour", rgba(l.colour))
-            addStringProperty("casingColour", rgba(K.bg))
+            addStringProperty("casingColour", rgba(K.bg.copy(alpha = l.colour.alpha)))
             addNumberProperty("width", l.width)
             addNumberProperty("casing", l.casing)
             addBooleanProperty("dashed", l.dashed)
@@ -179,6 +213,7 @@ private fun Style.setKavGeometry(g: MapGeometry) {
     }
     getSourceAs<GeoJsonSource>(SRC_LINES)?.setGeoJson(FeatureCollection.fromFeatures(lines))
     getSourceAs<GeoJsonSource>(SRC_DOTS)?.setGeoJson(FeatureCollection.fromFeatures(dotFeatures(g.dots)))
+    getSourceAs<GeoJsonSource>(SRC_MARKS)?.setGeoJson(FeatureCollection.fromFeatures(markFeatures(g.markers)))
 }
 
 private fun dotFeatures(dots: List<MapDot>): List<Feature> = dots.mapIndexed { i, d ->
@@ -192,15 +227,10 @@ private fun dotFeatures(dots: List<MapDot>): List<Feature> = dots.mapIndexed { i
 }
 
 private fun Style.setKavLive(g: MapGeometry) {
-    val marks = g.markers.map { m ->
-        Feature.fromGeometry(Point.fromLngLat(m.lon, m.lat)).apply {
-            addStringProperty("icon", m.icon)
-            addNumberProperty("rot", m.rotation)
-            addNumberProperty("alpha", m.alpha)
-        }
-    }
+    addKavImages(g.images)
+    getSourceAs<GeoJsonSource>(SRC_LIVE_HALOS)?.setGeoJson(FeatureCollection.fromFeatures(dotFeatures(g.halos)))
     getSourceAs<GeoJsonSource>(SRC_LIVE_DOTS)?.setGeoJson(FeatureCollection.fromFeatures(dotFeatures(g.dots)))
-    getSourceAs<GeoJsonSource>(SRC_LIVE_MARKS)?.setGeoJson(FeatureCollection.fromFeatures(marks))
+    getSourceAs<GeoJsonSource>(SRC_LIVE_MARKS)?.setGeoJson(FeatureCollection.fromFeatures(markFeatures(g.markers)))
 }
 
 private fun arrowBitmap(dp: Float): android.graphics.Bitmap {
@@ -276,6 +306,12 @@ class MapProjection(
             ((wy - centerWorldY) * pxPerWorld + height / 2).toFloat(),
         )
     }
+
+    fun latLon(at: Offset): Pair<Double, Double> {
+        val wx = (at.x - width / 2) / pxPerWorld + centerWorldX
+        val wy = (at.y - height / 2) / pxPerWorld + centerWorldY
+        return Geo.lat(wy) to Geo.lon(wx)
+    }
 }
 
 private data class WorldPoint(val x: Double, val y: Double)
@@ -320,6 +356,7 @@ private class MapCamera {
         private set
     private var animation: Job? = null
     private var destination: Camera? = null
+    private var followed = false
     private var previousPoints = emptyList<WorldPoint>()
     private var previousViewport: Viewport? = null
     private var previousFocus: Any? = null
@@ -328,8 +365,10 @@ private class MapCamera {
 
     fun update(points: List<WorldPoint>, viewport: Viewport, focus: Any?, padding: Float, maxZoom: Float, scope: CoroutineScope) {
         if (points.isEmpty() || viewport.w <= 0 || viewport.h <= 0) return
-        val reframe = value == null || previousFocus != focus || previousViewport != viewport ||
-            previousPadding != padding || previousMaxZoom != maxZoom
+        // Moved by hand, the map only reframes for something new to show, not for a resize.
+        val reframe = value == null || followed || previousFocus != focus ||
+            (!manual && (previousViewport != viewport || previousPadding != padding || previousMaxZoom != maxZoom))
+        followed = false
         val current = destination ?: value
         val changed = points.filterIndexed { index, point -> previousPoints.getOrNull(index) != point }
         previousPoints = points
@@ -339,7 +378,7 @@ private class MapCamera {
         previousMaxZoom = maxZoom
         if (reframe) {
             reset(points, viewport, padding, maxZoom, scope)
-        } else if (current != null && changed.any { !viewport.contains(it, current) }) {
+        } else if (!manual && current != null && changed.any { !viewport.contains(it, current) }) {
             val area = viewport.inset(padding)
             val scale = current.pxPerWorld
             val bounds = listOf(
@@ -374,6 +413,7 @@ private class MapCamera {
             ((target.bearing % 360f) + 360f) % 360f,
         )
         manual = false
+        followed = true
         moveTo(goal, scope, duration = 700)
     }
 
@@ -478,9 +518,9 @@ fun TileMap(
     follow: Follow? = null,
     geometry: MapGeometry? = null,
     live: MapGeometry? = null,
-    animatedOverlay: DrawScope.(MapProjection) -> Unit = {},
-    overlay: DrawScope.(MapProjection) -> Unit = {},
     onTap: ((Offset, MapProjection) -> Unit)? = null,
+    onLook: ((centre: Pair<Double, Double>?, reachKm: Double) -> Unit)? = null,
+    moved: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val density = LocalDensity.current
@@ -535,8 +575,8 @@ fun TileMap(
         }
     }
     val mapReady = MapFile.state is MapFile.State.Ready
-    LaunchedEffect(map, mapReady) {
-        if (mapReady) map?.setStyle(Style.Builder().fromJson(MapFile.styleJson(ctx))) { style = it }
+    LaunchedEffect(map, mapReady, K.light) {
+        if (mapReady) map?.setStyle(Style.Builder().fromJson(MapFile.styleJson(ctx, K.light))) { style = it }
     }
     fun Style.ensureKavIcons() {
         val px = with(density) { 1.dp.toPx() }
@@ -563,6 +603,18 @@ fun TileMap(
             s.setKavLive(live)
         }
     }
+    if (live?.halos?.isNotEmpty() == true) {
+        val pulse = rememberLivePulse()
+        LaunchedEffect(style) {
+            val s = style?.takeIf { it.isFullyLoaded } ?: return@LaunchedEffect
+            snapshotFlow { pulse.value }.collect { p ->
+                if (!s.isFullyLoaded) return@collect
+                s.getLayer(HALO_LAYER)?.setProperties(
+                    PropertyFactory.circleRadius(Expression.product(Expression.toNumber(Expression.get("r")), Expression.literal(p))),
+                )
+            }
+        }
+    }
 
     BoxWithConstraints(modifier.clipToBounds().background(K.surface1)) {
         val w = with(density) { maxWidth.toPx() }
@@ -584,6 +636,17 @@ fun TileMap(
             if (follow != null && !camera.manual) camera.follow(follow, viewport, scope)
         }
         val anchor = viewport.anchor
+        val look by rememberUpdatedState(onLook)
+        if (onLook != null) LaunchedEffect(w, h) {
+            snapshotFlow { camera.value?.takeIf { camera.manual } }.collectLatest { c ->
+                if (c == null) return@collectLatest
+                kotlinx.coroutines.delay(600)
+                val proj = MapProjection(c.worldX, c.worldY, c.pxPerWorld, w, h)
+                val mid = proj.latLon(Offset(w / 2, h / 2))
+                val corner = proj.latLon(Offset(0f, 0f))
+                look?.invoke(mid, metres(mid.first, mid.second, corner.first, corner.second) / 1000.0)
+            }
+        }
 
         LaunchedEffect(map, w, h, anchor) {
             val m = map ?: return@LaunchedEffect
@@ -591,15 +654,11 @@ fun TileMap(
                 .collect { (cam, pitch) -> m.driveTo(cam, anchor, w, h, pitch, density.density) }
         }
 
-        fun DrawScope.turned(block: DrawScope.() -> Unit) {
-            val current = camera.value ?: return
-            rotate(-current.rotation, anchor) { block() }
-        }
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
         val tap by rememberUpdatedState(onTap)
-        Canvas(
-            Modifier.fillMaxSize().graphicsLayer { alpha = 1f - tilt / TILT_DEG }
+        Box(
+            Modifier.fillMaxSize()
                 .then(if (onTap == null) Modifier else Modifier.pointerInput(anchor) {
                     detectTapGestures { at ->
                         val current = camera.value ?: return@detectTapGestures
@@ -615,15 +674,7 @@ fun TileMap(
                         camera.gesture(centroid, panChange, zoomChange, twist, liveViewport)
                     }
                 },
-        ) {
-            val current = camera.value ?: return@Canvas
-            turned { overlay(MapProjection(current.worldX, current.worldY, current.pxPerWorld, size.width, size.height)) }
-        }
-
-        Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = 1f - tilt / TILT_DEG }) {
-            val current = camera.value ?: return@Canvas
-            turned { animatedOverlay(MapProjection(current.worldX, current.worldY, current.pxPerWorld, size.width, size.height)) }
-        }
+        )
 
         if (!mapReady) MapDownloadCard(
             Modifier.align(Alignment.TopStart)
@@ -632,15 +683,16 @@ fun TileMap(
                     with(density) { (h - padT - padB).coerceAtLeast(1f).toDp() }),
         )
 
-        if (camera.manual) {
+        if (camera.manual || moved) {
             Text(
                 if (follow != null) T("Follow", "עקבו") else T("Reset", "איפוס"),
                 fontSize = 11.sp, color = K.text,
                 modifier = Modifier.align(Alignment.TopEnd)
                     .padding(top = contentPadding.calculateTopPadding() + K.gap2,
                         end = contentPadding.calculateEndPadding(layoutDirection) + K.gap2)
-                    .clip(RoundedCornerShape(999.dp)).background(K.plateStrong)
+                    .panel(999.dp)
                     .clickable {
+                        look?.invoke(null, 0.0)
                         val me = recenterOn?.takeIf { it.first.isFinite() && it.second.isFinite() }
                         when {
                             follow != null -> camera.resume()
@@ -667,7 +719,7 @@ private fun MapDownloadCard(modifier: Modifier) {
     val ctx = LocalContext.current
     Box(modifier, contentAlignment = Alignment.Center) {
         Column(
-            Modifier.padding(K.gap4).clip(RoundedCornerShape(14.dp)).background(K.plateStrong).padding(K.gap4),
+            Modifier.padding(K.gap4).panel(14.dp).padding(K.gap4),
             verticalArrangement = Arrangement.spacedBy(K.gap2),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -692,7 +744,7 @@ private fun MapDownloadCard(modifier: Modifier) {
                         Modifier.clip(RoundedCornerShape(K.rPill)).background(K.accent)
                             .clickable { MapFile.startDownload(ctx) }
                             .padding(horizontal = 18.dp, vertical = 8.dp),
-                    ) { Text(if (s is MapFile.State.Failed) T("Try again", "נסו שוב") else T("Download", "הורדה"), fontSize = 13.sp, color = K.bg, fontWeight = FontWeight.Medium) }
+                    ) { Text(if (s is MapFile.State.Failed) T("Try again", "נסו שוב") else T("Download", "הורדה"), fontSize = 13.sp, color = K.onAccent, fontWeight = FontWeight.Medium) }
                 }
             }
         }

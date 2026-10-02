@@ -12,7 +12,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -24,6 +23,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import uk.noammm.kav.data.Moovit
+import uk.noammm.kav.data.MoovitSession
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -40,6 +40,8 @@ fun whenLabel(t: Long, now: Long = System.currentTimeMillis() / 1000): String {
     }
 }
 
+private suspend fun onlineSession(): MoovitSession? = runCatching { Online.open() }.getOrNull()
+
 @Composable
 fun rememberStopNames(ids: List<Int>): Map<Int, Moovit.StopInfo> {
     val wanted = ids.filter { it > 0 }.distinct()
@@ -47,7 +49,7 @@ fun rememberStopNames(ids: List<Int>): Map<Int, Moovit.StopInfo> {
     var out by remember(key) { mutableStateOf(emptyMap<Int, Moovit.StopInfo>()) }
     LaunchedEffect(key) {
         if (wanted.isEmpty()) return@LaunchedEffect
-        val s = Online.session ?: return@LaunchedEffect
+        val s = onlineSession() ?: return@LaunchedEffect
         for (batch in wanted.chunked(6)) {
             val resolved = coroutineScope {
                 batch.map { id -> async(Dispatchers.IO) {
@@ -71,7 +73,7 @@ fun rememberLineRoutes(shapeIds: List<Int>): Map<Int, List<Pair<Double, Double>>
     var out by remember(key) { mutableStateOf(emptyMap<Int, List<Pair<Double, Double>>>()) }
     LaunchedEffect(key) {
         if (wanted.isEmpty()) return@LaunchedEffect
-        val s = Online.session ?: return@LaunchedEffect
+        val s = onlineSession() ?: return@LaunchedEffect
         out = withContext(Dispatchers.IO) {
             wanted.associateWith { runCatching { Moovit.tripShape(s, it) }.getOrDefault(emptyList()) }
                 .filterValues { it.isNotEmpty() }
@@ -148,7 +150,7 @@ fun LiveLocationScreen(
         }
 
         VehicleMap(
-            leg, arrival,
+            leg, arrival, modeOf(if (info != null) r.routeType(info.agencyId) else 3),
             approach = lineRoute(arrival, r).ifEmpty { fetched },
             modifier = Modifier.padding(horizontal = K.gap3),
         )
@@ -167,18 +169,24 @@ fun lineRoute(a: Moovit.Arrival?, r: Moovit.Resolved): List<Pair<Double, Double>
 private fun VehicleMap(
     leg: Moovit.Leg,
     a: Moovit.Arrival?,
+    mode: Mode,
     approach: List<Pair<Double, Double>> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     if (leg.shape.size < 2) return
-    val pulse = rememberLivePulse()
-    val points = leg.shape + approach +
-        listOfNotNull(a?.takeIf { it.hasLocation }?.let { it.lat to it.lon })
-    val geometry = remember(approach, leg) {
+    val bus = a?.takeIf { it.hasLocation }
+    val points = leg.shape + approach + listOfNotNull(bus?.let { it.lat to it.lon })
+    val geometry = remember(approach, leg, K.look, bus?.lat, bus?.lon, bus?.vehicleStatus) {
+        // Off its route, a dashed line ties the bus to the nearest point of the route.
+        val astray = bus?.takeIf { it.vehicleStatus == 2 }?.let { b ->
+            val near = leg.shape.minBy { (lat, lon) -> metres(lat, lon, b.lat, b.lon) }
+            MapLine(listOf(near, b.lat to b.lon), K.problem, 1.5f, dashed = true)
+        }
         MapGeometry(
-            lines = listOf(
+            lines = listOfNotNull(
                 MapLine(approach, K.routeIdle, 3f, casing = 7f),
                 MapLine(leg.shape, K.route, 4f, casing = 8f),
+                astray,
             ),
             dots = listOf(
                 MapDot(leg.shape.first().first, leg.shape.first().second, K.bg, 6f),
@@ -190,30 +198,9 @@ private fun VehicleMap(
     }
     TileMap(
         points,
-        modifier.fillMaxWidth().height(260.dp).clip(RoundedCornerShape(K.rCard)).background(K.surface1),
+        modifier.fillMaxWidth().height(260.dp).panel(K.rCard),
         geometry = geometry,
-        animatedOverlay = { proj ->
-            if (a != null && a.hasLocation) {
-                val p = proj.point(a.lat, a.lon)
-                if (a.vehicleStatus == 2) {
-                    var nearest = proj.point(leg.shape[0].first, leg.shape[0].second)
-                    var best = Float.MAX_VALUE
-                    for ((lat, lon) in leg.shape) {
-                        val q = proj.point(lat, lon)
-                        val d = (q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y)
-                        if (d < best) { best = d; nearest = q }
-                    }
-                    drawLine(
-                        K.problem, nearest, p, 1.5.dp.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx())),
-                    )
-                }
-                val tint = if (a.vehicleStatus == 2) K.problem else K.live
-                drawCircle(tint.copy(alpha = 0.20f), 18.dp.toPx() * pulse.value, p)
-                drawCircle(K.bg, 9.dp.toPx(), p)
-                drawCircle(tint, 6.dp.toPx(), p)
-            }
-        },
+        live = vehicleGeometry(listOfNotNull(bus?.let { it to mode })),
     )
 }
 
@@ -227,13 +214,14 @@ private fun StatusBlock(
 ) {
     Column(
         Modifier.fillMaxWidth().padding(horizontal = K.gap3)
-            .clip(RoundedCornerShape(K.rCard)).background(K.surface1).padding(K.gap4),
+            .panel(K.rCard).padding(K.gap4),
     ) {
+        val lineLive = r.liveFor(leg).any { it.hasLocation }
         val (headline, tint) = when {
-            a == null -> T("This line doesn’t have a live location", "לקו הזה אין מיקום בזמן אמת") to K.dim
-            a.status == 3 -> T("Canceled for this station", "מבוטל עבור תחנה זו") to K.critical
-            a.vehicleStatus == 3 -> T("Line not departed yet", "הקו טרם יצא") to K.dim
-            !a.hasLocation -> T("This line doesn’t have a live location", "לקו הזה אין מיקום בזמן אמת") to K.dim
+            a?.status == 3 -> T("Canceled for this station", "מבוטל עבור תחנה זו") to K.critical
+            a?.vehicleStatus == 3 -> T("Line not departed yet", "הקו טרם יצא") to K.dim
+            (a == null || !a.hasLocation) && lineLive -> T("Your bus hasn't set out yet", "האוטובוס שלכם עוד לא יצא לדרך") to K.dim
+            a == null || !a.hasLocation -> T("This line doesn’t have a live location", "לקו הזה אין מיקום בזמן אמת") to K.dim
             a.vehicleStatus == 2 -> T("Out of route", "מחוץ למסלול") to K.problem
             now - a.sampleUtc <= 120 -> T("Location updated recently", "המיקום עודכן לאחרונה") to K.live
             else -> T("Location is estimated", "המיקום משוער") to K.problem

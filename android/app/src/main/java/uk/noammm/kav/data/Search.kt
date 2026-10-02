@@ -25,6 +25,37 @@ fun Net.searchStops(q: String, limit: Int = 60): IntArray {
     return IntArray(minOf(limit, orderIdx.size)) { idx[orderIdx[it]] }
 }
 
+internal fun searchWords(s: String): List<String> {
+    val sb = StringBuilder(s.length)
+    for (c in java.text.Normalizer.normalize(s.trim(), java.text.Normalizer.Form.NFD)) {
+        if (Character.UnicodeBlock.of(c) == Character.UnicodeBlock.COMBINING_DIACRITICAL_MARKS) continue
+        sb.append(if (c.isLetter()) c.lowercaseChar() else if (c.isDigit()) c else ' ')
+    }
+    return sb.split(' ').filter { it.isNotEmpty() }
+}
+
+internal fun spacedWords(s: String) = searchWords(s).joinToString(" ", " ", " ")
+
+// Like Moovit's own stop search: every typed word has to start a word of the name, code or mode.
+fun Net.stopsMatching(q: String, at: Pair<Double, Double>?, modeName: (Int) -> String): List<Int> {
+    val need = searchWords(q).map { " $it" }
+    if (need.isEmpty()) return emptyList()
+    val words = stopWords
+    val types = stopType
+    val modes = HashMap<Int, String>()
+    val codes = HashSet<Int>()
+    val hits = ArrayList<Int>()
+    for (i in words.indices) {
+        val mode = modes.getOrPut(types[i]) { if (types[i] < 0) "" else spacedWords(modeName(types[i])) }
+        if (need.all { words[i].contains(it) || mode.contains(it) } && (code[i] <= 0 || codes.add(code[i]))) hits.add(i)
+    }
+    if (at == null) return hits.sortedBy { name[it] }.take(4)
+    val (la, lo) = at
+    fun sq(i: Int) = (la - lat[i]) * (la - lat[i]) + (lo - lon[i]) * (lo - lon[i])
+    return hits.sortedWith(compareBy({ sq(it) }, { name[it] })).take(4)
+        .sortedWith(compareBy({ Math.round(uk.noammm.kav.ui.metres(la, lo, lat[it], lon[it])) }, { name[it] }))
+}
+
 fun Net.searchRoutes(q: String, types: IntArray = intArrayOf()): IntArray {
     val need = q.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
     val out = ArrayList<Int>(256)

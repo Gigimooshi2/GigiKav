@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -54,10 +55,21 @@ private fun StationList(model: KavModel, net: Net) {
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) { locating = true; requestLocationOnce(ctx) { model.here = it; locating = false } }
     }
+    var onMap by remember { mutableStateOf(false) }
+    if (onMap) {
+        StopMapPicker(
+            net, model.here,
+            onPick = {}, onDismiss = { onMap = false },
+            onLocate = { model.here = it },
+            onStop = { s -> onMap = false; model.stationStop = s },
+        )
+        return
+    }
 
     var hits by remember(net) { mutableStateOf(emptyList<Int>()) }
     LaunchedEffect(net, q) {
         hits = withContext(Dispatchers.Default) { net.searchStops(q).toList() }
+        StopPhotos.prefetchNet(net, hits.take(40))
     }
     val here = model.here
     var near by remember(net) { mutableStateOf(emptyList<Pair<Int, Double>>()) }
@@ -65,58 +77,72 @@ private fun StationList(model: KavModel, net: Net) {
         near = withContext(Dispatchers.Default) {
             if (here == null) emptyList() else net.nearestStops(here.first, here.second)
         }
+        StopPhotos.prefetchNet(net, near.map { it.first })
     }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(T("Find a", "מצאו"), T("stop", "תחנה"), onSettings = { model.settingsOpen = true })
-        KavField(q, { q = it }, T("search stops…", "חיפוש תחנות…"), Modifier.padding(horizontal = K.gap3).fillMaxWidth())
-        Spacer(Modifier.height(K.gap3))
-
-        if (q.isNotBlank()) {
-            if (hits.isEmpty()) {
-                Note(T("Nothing matches that.", "שום דבר לא תואם."), Modifier.padding(horizontal = K.gap4, vertical = K.gap4))
-            }
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(
-                start = K.gap2, end = K.gap2, bottom = LocalBottomBarInset.current,
-            )) {
-                items(hits, key = { it }) { s -> StopRow(net, s) { model.stationStop = s } }
-            }
-        } else {
-            Sig(T("Nearby", "תחנות"), T("stops", "בסביבה"), Modifier.padding(horizontal = K.gap4, vertical = K.gap1))
-            when {
-                here == null -> Column(Modifier.padding(horizontal = K.gap4, vertical = K.gap3)) {
-                    Note(if (locating) T("Waiting for a fix…", "ממתינים למיקום…") else T("Kav does not know where you are yet.", "Kav עדיין לא יודע איפה אתם."))
+        ScreenHeader(T("Find a", "מצאו"), T("stop", "תחנה"))
+        val listState = rememberLazyListState()
+        Box(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(
+            start = K.gap2, end = K.gap2, bottom = LocalBottomBarInset.current,
+        )) {
+            item(key = "search") {
+                Column {
+                    KavField(q, { q = it }, T("search stops…", "חיפוש תחנות…"), Modifier.padding(horizontal = K.gap1).fillMaxWidth())
+                    Spacer(Modifier.height(K.gap2))
+                    SelectOnMapRow(K.gap1) { onMap = true }
                     Spacer(Modifier.height(K.gap3))
-                    Chip(if (locating) T("Locating…", "מאתרים מיקום…") else T("Use my location", "השתמשו במיקום שלי"), locating) {
-                        if (hasLocationPermission(ctx)) {
-                            locating = true
-                            requestLocationOnce(ctx) { model.here = it; locating = false }
-                        } else {
-                            ask.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+                }
+            }
+            if (q.isNotBlank()) {
+                if (hits.isEmpty()) item {
+                    Note(T("Nothing matches that.", "שום דבר לא תואם."), Modifier.padding(horizontal = K.gap3, vertical = K.gap4))
+                }
+                items(hits, key = { it }) { s ->
+                    StopRow(net, s, leading = { StationThumb(net, s) }) { model.stationStop = s }
+                }
+            } else {
+                item {
+                    Sig(T("Nearby", "תחנות"), T("stops", "בסביבה"), Modifier.padding(horizontal = K.gap3, vertical = K.gap1))
+                }
+                when {
+                    here == null -> item {
+                        Column(Modifier.padding(horizontal = K.gap4, vertical = K.gap3)) {
+                        Note(if (locating) T("Waiting for a fix…", "ממתינים למיקום…") else T("Kav does not know where you are yet.", "Kav עדיין לא יודע איפה אתם."))
+                        Spacer(Modifier.height(K.gap3))
+                        Chip(if (locating) T("Locating…", "מאתרים מיקום…") else T("Use my location", "השתמשו במיקום שלי"), locating) {
+                            if (hasLocationPermission(ctx)) {
+                                locating = true
+                                requestLocationOnce(ctx) { model.here = it; locating = false }
+                            } else {
+                                ask.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+                            }
                         }
+                        Spacer(Modifier.height(K.gap3))
+                        Text(
+                            T(
+                                "Coarse location, read once, used only to sort this list. " +
+                                    "It is never stored and never leaves the phone.",
+                                "מיקום גס, שנקרא פעם אחת, משמש רק למיון הרשימה הזו. הוא לעולם לא נשמר ולא יוצא מהטלפון.",
+                            ),
+                            fontSize = 11.sp, color = K.dim, lineHeight = 16.sp,
+                        )
                     }
-                    Spacer(Modifier.height(K.gap3))
-                    Text(
-                        T(
-                            "Coarse location, read once, used only to sort this list. " +
-                                "It is never stored and never leaves the phone.",
-                            "מיקום גס, שנקרא פעם אחת, משמש רק למיון הרשימה הזו. הוא לעולם לא נשמר ולא יוצא מהטלפון.",
-                        ),
-                        fontSize = 11.sp, color = K.dim, lineHeight = 16.sp,
-                    )
-                }
-                near.isEmpty() -> Note(
-                    T("No stops within 2.5 km of you.", "אין תחנות במרחק של 2.5 ק״מ מכם."),
-                    Modifier.padding(horizontal = K.gap4, vertical = K.gap4),
-                )
-                else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(
-                    start = K.gap2, end = K.gap2, bottom = LocalBottomBarInset.current,
-                )) {
-                    items(near, key = { it.first }) { (s, d) ->
-                        StopRow(net, s, distanceLabel(d)) { model.stationStop = s }
+                    }
+                    near.isEmpty() -> item {
+                        Note(
+                            T("No stops within 2.5 km of you.", "אין תחנות במרחק של 2.5 ק״מ מכם."),
+                            Modifier.padding(horizontal = K.gap3, vertical = K.gap4),
+                        )
+                    }
+                    else -> items(near, key = { it.first }) { (s, d) ->
+                        StopRow(net, s, distanceLabel(d), leading = { StationThumb(net, s) }) { model.stationStop = s }
                     }
                 }
             }
+        }
+        ScrollEdge(listState.canScrollBackward)
         }
     }
 }
@@ -124,31 +150,48 @@ private fun StationList(model: KavModel, net: Net) {
 @Composable
 private fun DepartureBoard(model: KavModel, net: Net, stop: Int, onBack: () -> Unit) {
     val t0 = remember(stop) { nowSec() }
+    var moovitId by remember(stop) { mutableStateOf(StopPhotos.idNow(net, stop) ?: -1) }
+    LaunchedEffect(stop) { if (moovitId <= 0) moovitId = StopPhotos.idOf(net, stop) ?: -1 }
+    // Trips past midnight are written as 24:00 and later, on the day they set out.
     val rows = remember(stop, t0) {
-        val out = ArrayList<Int>(60)
+        val today = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK) - 1
+        val yesterday = (today + 6) % 7
+        val out = ArrayList<Pair<Int, Int>>()
         var i = net.dStart[stop]
-        while (i < net.dStart[stop + 1] && out.size < 60) {
+        while (i < net.dStart[stop + 1]) {
             val c = net.dConn[i]
-            if (net.stDep[net.cST[c]] >= t0) out.add(c)
+            val st = net.cST[c]
+            val dep = net.stDep[st]
+            val t = net.tripOf(st)
+            if (dep >= t0 && net.runsOn(t, today)) out.add(c to dep)
+            else if (dep >= t0 + 86_400 && net.runsOn(t, yesterday)) out.add(c to dep - 86_400)
             i++
         }
-        out
+        out.sortedBy { it.second }.take(60)
     }
 
     Column(Modifier.fillMaxSize().background(K.bg)) {
         ScreenHeader(T("Next", "היציאות"), T("departures", "הקרובות"), back = onBack)
         Column(Modifier.padding(horizontal = K.gap4)) {
-            Text(net.name[stop], fontSize = 14.sp, color = K.text)
-            val city = net.cityOf(stop)
-            val code = net.code.getOrElse(stop) { 0 }
-            Text(
-                listOf(
-                    city.takeIf { it.isNotBlank() },
-                    code.takeIf { it > 0 }?.let { T("stop $it", "תחנה $it") },
-                    T("scheduled times, no live feed available", "לוחות זמנים מתוכננים, אין זמינות בזמן אמת"),
-                ).filterNotNull().joinToString(" · "),
-                fontSize = 11.sp, color = K.dim,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (moovitId > 0) {
+                    StopGlyphOrPhoto(moovitId, null, thumb = 56.dp)
+                    Spacer(Modifier.width(K.gap3))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(net.name[stop], fontSize = 14.sp, color = K.text)
+                    val city = net.cityOf(stop)
+                    val code = net.code.getOrElse(stop) { 0 }
+                    Text(
+                        listOf(
+                            city.takeIf { it.isNotBlank() },
+                            code.takeIf { it > 0 }?.let { T("stop $it", "תחנה $it") },
+                            T("scheduled times, no live feed available", "לוחות זמנים מתוכננים, אין זמינות בזמן אמת"),
+                        ).filterNotNull().joinToString(" · "),
+                        fontSize = 11.sp, color = K.dim,
+                    )
+                }
+            }
             Spacer(Modifier.height(K.gap3))
             Row(horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
                 Chip(T("Start here", "התחלה כאן"), false) {
@@ -166,9 +209,8 @@ private fun DepartureBoard(model: KavModel, net: Net, stop: Int, onBack: () -> U
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(
             start = K.gap2, end = K.gap2, bottom = LocalBottomBarInset.current,
         )) {
-            items(rows) { c ->
-                val t = net.cTrip[c]
-                val dep = net.stDep[net.cST[c]]
+            items(rows) { (c, dep) ->
+                val t = net.tripOf(net.cST[c])
                 val last = net.tripLast(t)
                 Row(
                     Modifier
@@ -195,10 +237,24 @@ private fun DepartureBoard(model: KavModel, net: Net, stop: Int, onBack: () -> U
     }
 }
 
-internal fun placeOf(net: Net, stop: Int) = uk.noammm.kav.data.Moovit.Place(
+@Composable
+private fun StationThumb(net: Net, stop: Int) {
+    var id by remember(stop) { mutableStateOf(StopPhotos.idNow(net, stop) ?: -1) }
+    LaunchedEffect(stop) { if (id <= 0) id = StopPhotos.idOf(net, stop) ?: -1 }
+    Box(
+        Modifier.size(40.dp).panel(10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (id > 0) StopGlyphOrPhoto(id, null)
+    }
+}
+
+internal fun placeOf(net: Net, stop: Int, meters: Int = -1) = uk.noammm.kav.data.Moovit.Place(
     name = net.name.getOrElse(stop) { T("Stop", "תחנה") },
     detail = net.cityOf(stop),
     lat = net.lat[stop].toDouble(),
     lon = net.lon[stop].toDouble(),
     type = 1,
+    meters = meters,
 )
+

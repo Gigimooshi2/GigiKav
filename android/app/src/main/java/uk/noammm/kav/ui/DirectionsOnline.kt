@@ -2,20 +2,14 @@
 
 package uk.noammm.kav.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +76,7 @@ fun DirectionsOnline(model: KavModel) {
     var departAt by remember { mutableLongStateOf(0L) }
     var timeType by remember { mutableIntStateOf(Moovit.TIME_DEPARTURE) }
     var whenOpen by remember { mutableStateOf(false) }
+    var orderOpen by remember { mutableStateOf(false) }
     var autoOpen by remember { mutableStateOf<RecentTrip?>(null) }
     var linkTrip by remember { mutableStateOf<List<MoovitLink.Ride>?>(null) }
     val filters = model.filters
@@ -136,8 +131,7 @@ fun DirectionsOnline(model: KavModel) {
         planning = true
         if (departAt != 0L) delay(250)
         try {
-            val s = Online.session ?: withContext(Dispatchers.IO) { Moovit.register(fromLL.first, fromLL.second) }
-                .also { Online.session = it }
+            val s = Online.open(fromLL)
             val res = withContext(Dispatchers.IO) {
                 Moovit.planItineraries(
                     s, fromLL, toLL, departAt, timeType,
@@ -153,6 +147,7 @@ fun DirectionsOnline(model: KavModel) {
                 }
             }
             planning = false
+            StopPhotos.prefetchIds(raw.flatMap { t -> t.rides.flatMap { r -> r.options.flatMap { listOf(it.fromStop, it.toStop) } } })
             resolved = withContext(Dispatchers.IO) { Moovit.hydrate(s, raw) }
             model.activeJourney?.takeIf { active -> raw.any { it === active.trip } }?.let {
                 model.activeJourney = it.copy(resolved = Moovit.Resolved(
@@ -260,9 +255,10 @@ fun DirectionsOnline(model: KavModel) {
         showResults = false
     }
 
+    val under by underSearch(picking != null)
     androidx.compose.animation.AnimatedContent(
         targetState = Triple(open, showResults, autoOpen != null || linkTrip != null),
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = under },
         transitionSpec = {
             if (targetState.first != null || (targetState.second && !initialState.second)) forward()
             else backward()
@@ -335,153 +331,133 @@ fun DirectionsOnline(model: KavModel) {
         return@AnimatedContent
     }
 
-    Column(Modifier.fillMaxSize()) {
-        PlanHeader(
-            from = endpointName(fromPlace) ?: if (here != null) hereName() else T("Choose a start…", "בחרו נקודת התחלה…"),
-            to = endpointName(toPlace) ?: T("Where do you want to go?…", "לאן תרצו להגיע?…"),
-            fromIsHere = fromIsHere,
-            toIsHere = isHere(toPlace),
-            onFrom = { picking = "from" },
-            onTo = { picking = "to" },
-            onSwap = {
-                val a = fromPlace
-                fromPlace = toPlace
-                toPlace = a ?: here?.let(::herePlace)
-            },
-            onBack = { showResults = false },
-        )
-        DepartRow(
-            whenLabel(departAt, timeType),
-            onWhen = { whenOpen = true },
-            onMap = null,
-        )
-        PreciseLocationNudge()
-
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                .padding(horizontal = K.gap3, vertical = K.gap3),
-            horizontalArrangement = Arrangement.spacedBy(K.gap2),
-            verticalAlignment = Alignment.CenterVertically,
+    val resultsState = androidx.compose.foundation.lazy.rememberLazyListState()
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            state = resultsState,
+            contentPadding = PaddingValues(bottom = K.gap6 + LocalBottomBarInset.current),
+            verticalArrangement = Arrangement.spacedBy(K.gap2),
         ) {
-            var sortMenu by remember { mutableStateOf(false) }
-            Box {
-                FilterChip(sort.labelText(), lit = sort != Sort.RECOMMENDED, caret = true) {
-                    sortMenu = true
-                }
-                androidx.compose.material3.DropdownMenu(
-                    expanded = sortMenu,
-                    onDismissRequest = { sortMenu = false },
-                ) {
-                    Sort.entries.filter { it != Sort.LOWEST_CO2 || Shown.co2 }.forEach { s ->
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = {
-                                Text(
-                                    s.labelText(), fontSize = 14.sp,
-                                    color = if (s == sort) K.text else K.muted,
-                                    fontWeight = if (s == sort) FontWeight.SemiBold else FontWeight.Normal,
-                                )
-                            },
-                            trailingIcon = if (s == sort) ({ CheckSmall() }) else null,
-                            onClick = { sort = s; sortMenu = false },
-                        )
-                    }
-                }
-            }
-            Box(Modifier.height(20.dp).width(1.dp).background(K.border))
-            FilterChip(T("Fewest transfers", "פחות החלפות"), lit = sort == Sort.LEAST_TRANSFERS) {
-                sort = if (sort == Sort.LEAST_TRANSFERS) Sort.RECOMMENDED else Sort.LEAST_TRANSFERS
-            }
-            FilterChip(T("Least walking", "פחות הליכה"), lit = sort == Sort.LEAST_WALKING) {
-                sort = if (sort == Sort.LEAST_WALKING) Sort.RECOMMENDED else Sort.LEAST_WALKING
-            }
-
-        }
-
-        when {
-            error == TOO_CLOSE -> Note(
-                T(
-                    "You're too close to your destination to plan a route.",
-                    "אתם קרובים מדי ליעד כדי לתכנן מסלול.",
-                ),
-                Modifier.padding(K.gap4),
-            )
-            error != null -> Note(error!!, Modifier.padding(K.gap4))
-            toLL == null -> Note(
-                if (here == null) T(
-                    "Choose where you are starting from, and where you are going.",
-                    "בחרו מהיכן אתם יוצאים ולאן אתם רוצים להגיע.",
+            item(key = "trip") {
+                PlanHeader(
+                    from = endpointName(fromPlace) ?: if (here != null) hereName() else T("Choose a start…", "בחרו נקודת התחלה…"),
+                    to = endpointName(toPlace) ?: T("Where do you want to go?…", "לאן תרצו להגיע?…"),
+                    fromIsHere = fromIsHere,
+                    toIsHere = isHere(toPlace),
+                    onFrom = { picking = "from" },
+                    onTo = { picking = "to" },
+                    onSwap = {
+                        val a = fromPlace
+                        fromPlace = toPlace
+                        toPlace = a ?: here?.let(::herePlace)
+                    },
+                    onBack = { showResults = false },
                 )
-                else T("Where do you want to go?", "לאן תרצו להגיע?"),
-                Modifier.padding(K.gap4),
-            )
-            fromLL == null -> Note(T("Choose a start to find routes.", "בחרו נקודת התחלה כדי למצוא מסלולים."), Modifier.padding(K.gap4))
-            planning -> LoadingBlock(T("Finding routes", "מחפשים מסלולים"))
-            shown.isEmpty() -> Note(
-                if (raw.isEmpty()) T("No routes found for this trip.", "לא נמצאו מסלולים לנסיעה הזו.")
-                else T("Every route found is switched off in your filters.", "כל המסלולים שנמצאו הוסתרו על ידי המסננים שלכם."),
-                Modifier.padding(K.gap4),
-            )
-            else -> Column {
-                if (timeType != Moovit.TIME_LAST) Row(
-                    Modifier.fillMaxWidth().padding(horizontal = K.gap3, vertical = K.gap1),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    fun nudge(delta: Long) {
-                        val now = System.currentTimeMillis()
-                        val base = if (departAt == 0L) now else departAt
-                        departAt = (base + delta).let { if (it < now + 60_000L) 0L else it }
-                        if (departAt == 0L) timeType = Moovit.TIME_DEPARTURE
-                    }
-                    ShiftButton(T("‹ Earlier", "› מוקדם יותר")) { nudge(-15 * 60_000L) }
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        shown.firstOrNull()?.let {
-                            java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
-                                .format(java.util.Date(it.dep * 1000))
-                        }.orEmpty(),
-                        fontSize = 12.sp, color = K.dim,
+            }
+            item(key = "when") {
+                Column {
+                    DepartRow(
+                        whenLabel(departAt, timeType),
+                        onWhen = { whenOpen = true },
+                        order = sort.labelText(),
+                        onOrder = { orderOpen = true },
                     )
-                    Spacer(Modifier.weight(1f))
-                    ShiftButton(T("Later ›", "מאוחר יותר ‹")) { nudge(15 * 60_000L) }
+                    PreciseLocationNudge()
                 }
-                LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = K.gap3, end = K.gap3,
-                    bottom = K.gap6 + LocalBottomBarInset.current),
-                verticalArrangement = Arrangement.spacedBy(K.gap2),
-            ) {
-                items(shown.size) { i ->
-                    val heading = plan.heading(shown[i])
-                    if (heading.isNotBlank() && (i == 0 || plan.heading(shown[i - 1]) != heading)) {
-                        Text(
-                            heading, style = DisplayItalic, fontSize = 12.sp, color = K.dim,
-                            modifier = Modifier.padding(start = K.gap1, top = K.gap3, bottom = 2.dp),
+            }
+            when {
+                error == TOO_CLOSE -> item {
+                    Note(
+                        T(
+                            "You're too close to your destination to plan a route.",
+                            "אתם קרובים מדי ליעד כדי לתכנן מסלול.",
+                        ),
+                        Modifier.padding(K.gap4),
+                    )
+                }
+                error != null -> item { Note(error.orEmpty(), Modifier.padding(K.gap4)) }
+                toLL == null -> item {
+                    Note(
+                        if (here == null) T(
+                            "Choose where you are starting from, and where you are going.",
+                            "בחרו מהיכן אתם יוצאים ולאן אתם רוצים להגיע.",
                         )
-                    }
-                    Box(Modifier.popIn(i, raw to sort)) {
-                        ItineraryCard(shown[i], resolved) {
-                            toPlace?.let { to -> Prefs.noteTripRoute(ctx, fromPlace, to, shown[i]) }
-                            open = OpenTrip(
-                                shown[i], resolved, fromPlace?.name ?: T("Current location", "המיקום הנוכחי"),
-                                toPlace?.name ?: T("Destination", "יעד"),
+                        else T("Where do you want to go?", "לאן תרצו להגיע?"),
+                        Modifier.padding(K.gap4),
+                    )
+                }
+                fromLL == null -> item { Note(T("Choose a start to find routes.", "בחרו נקודת התחלה כדי למצוא מסלולים."), Modifier.padding(K.gap4)) }
+                planning -> item { LoadingBlock(T("Finding routes", "מחפשים מסלולים"), Modifier.fillParentMaxHeight(.6f)) }
+                shown.isEmpty() -> item {
+                    Note(
+                        if (raw.isEmpty()) T("No routes found for this trip.", "לא נמצאו מסלולים לנסיעה הזו.")
+                        else T("Every route found is switched off in your filters.", "כל המסלולים שנמצאו הוסתרו על ידי המסננים שלכם."),
+                        Modifier.padding(K.gap4),
+                    )
+                }
+                else -> {
+                    if (timeType != Moovit.TIME_LAST) item(key = "shift") {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = K.gap3, vertical = K.gap1),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            fun nudge(delta: Long) {
+                                val now = System.currentTimeMillis()
+                                val base = if (departAt == 0L) now else departAt
+                                departAt = (base + delta).let { if (it < now + 60_000L) 0L else it }
+                                if (departAt == 0L) timeType = Moovit.TIME_DEPARTURE
+                            }
+                            ShiftButton(T("‹ Earlier", "› מוקדם יותר")) { nudge(-15 * 60_000L) }
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                shown.firstOrNull()?.let {
+                                    java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+                                        .format(java.util.Date(it.dep * 1000))
+                                }.orEmpty(),
+                                fontSize = 12.sp, color = K.dim,
                             )
+                            Spacer(Modifier.weight(1f))
+                            ShiftButton(T("Later ›", "מאוחר יותר ‹")) { nudge(15 * 60_000L) }
+                        }
+                    }
+                    items(shown.size) { i ->
+                        Column(Modifier.padding(horizontal = K.gap3)) {
+                            val heading = plan.heading(shown[i])
+                            if (heading.isNotBlank() && (i == 0 || plan.heading(shown[i - 1]) != heading)) {
+                                Text(
+                                    heading, style = DisplayItalic, fontSize = 12.sp, color = K.dim,
+                                    modifier = Modifier.padding(start = K.gap1, top = K.gap3, bottom = 2.dp),
+                                )
+                            }
+                            Box(Modifier.popIn(i, raw to sort)) {
+                                ItineraryCard(shown[i], resolved) {
+                                    toPlace?.let { to -> Prefs.noteTripRoute(ctx, fromPlace, to, shown[i]) }
+                                    open = OpenTrip(
+                                        shown[i], resolved, fromPlace?.name ?: T("Current location", "המיקום הנוכחי"),
+                                        toPlace?.name ?: T("Destination", "יעד"),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-                }
             }
         }
+        ScrollEdge(resultsState.canScrollBackward)
     }
+
 
     }
 
     val settingFav = model.settingFavourite
     LaunchedEffect(settingFav) { if (settingFav != null) picking = "fav" }
 
+    val rise = with(androidx.compose.ui.platform.LocalDensity.current) { 76.dp.roundToPx() }
     androidx.compose.animation.AnimatedContent(
         targetState = picking,
         modifier = Modifier.fillMaxSize(),
-        transitionSpec = { if (targetState != null) forward() else backward() },
+        transitionSpec = { if (targetState != null) searchIn(rise) else searchOut(rise) },
         label = "placePicker",
     ) { which ->
         if (which != null) {
@@ -514,6 +490,15 @@ fun DirectionsOnline(model: KavModel) {
         }
     }
 
+    if (orderOpen) {
+        val orders = Sort.entries.filter { it != Sort.LOWEST_CO2 || Shown.co2 }
+        ChoiceSheet(
+            T("Order routes by", "סדר המסלולים"), orders.map { it.labelText() }, orders.indexOf(sort),
+            onPick = { sort = orders[it]; orderOpen = false },
+            onDismiss = { orderOpen = false },
+        )
+    }
+
     if (whenOpen) WhenSheet(
         departAt = departAt,
         timeType = timeType,
@@ -523,46 +508,6 @@ fun DirectionsOnline(model: KavModel) {
         onNow = { departAt = 0L; timeType = Moovit.TIME_DEPARTURE; whenOpen = false },
         onDismiss = { whenOpen = false },
     )
-}
-
-@Composable
-private fun FilterChip(label: String, lit: Boolean, caret: Boolean = false, onClick: () -> Unit) {
-    Row(
-        Modifier.glassSurface(K.rPill)
-            .then(if (lit) Modifier.background(K.plateStrong) else Modifier)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, fontSize = 13.sp, color = if (lit) K.text else K.muted)
-        if (caret) { Spacer(Modifier.width(7.dp)); CaretSmall() }
-    }
-}
-
-@Composable
-private fun CheckSmall() {
-    androidx.compose.foundation.Canvas(Modifier.size(12.dp)) {
-        val w = size.width; val h = size.height
-        drawLine(K.text, androidx.compose.ui.geometry.Offset(w * .14f, h * .55f),
-            androidx.compose.ui.geometry.Offset(w * .40f, h * .80f), w * .14f,
-            androidx.compose.ui.graphics.StrokeCap.Round)
-        drawLine(K.text, androidx.compose.ui.geometry.Offset(w * .40f, h * .80f),
-            androidx.compose.ui.geometry.Offset(w * .86f, h * .24f), w * .14f,
-            androidx.compose.ui.graphics.StrokeCap.Round)
-    }
-}
-
-@Composable
-private fun CaretSmall() {
-    androidx.compose.foundation.Canvas(Modifier.size(10.dp)) {
-        val w = size.width; val h = size.height
-        drawLine(K.muted, androidx.compose.ui.geometry.Offset(w * .18f, h * .38f),
-            androidx.compose.ui.geometry.Offset(w * .5f, h * .66f), w * .14f,
-            androidx.compose.ui.graphics.StrokeCap.Round)
-        drawLine(K.muted, androidx.compose.ui.geometry.Offset(w * .5f, h * .66f),
-            androidx.compose.ui.geometry.Offset(w * .82f, h * .38f), w * .14f,
-            androidx.compose.ui.graphics.StrokeCap.Round)
-    }
 }
 
 internal fun sameRoute(candidate: Moovit.Itinerary, taken: RecentTrip): Boolean {
@@ -596,8 +541,7 @@ internal fun sameLines(candidate: Moovit.Itinerary, named: List<MoovitLink.Ride>
 private fun ShiftButton(label: String, onClick: () -> Unit) {
     Text(
         label, fontSize = 12.sp, color = K.text,
-        modifier = Modifier.clip(RoundedCornerShape(K.rPill)).background(K.surface1)
-            .border(1.dp, K.border, RoundedCornerShape(K.rPill))
+        modifier = Modifier.panel(K.rPill)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 7.dp),
     )

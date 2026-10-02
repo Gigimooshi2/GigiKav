@@ -33,10 +33,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import uk.noammm.kav.data.Moovit
+import kotlin.math.roundToInt
 
 class Favourite(val id: String, val name: String, val icon: String, val place: Moovit.Place?) {
     fun copy(name: String = this.name, icon: String = this.icon, place: Moovit.Place? = this.place) =
@@ -136,59 +138,9 @@ fun FavouriteStrip(
     var held by remember { mutableStateOf<String?>(null) }
     var dx by remember { mutableFloatStateOf(0f) }
     val shown = order ?: favourites
+    androidx.activity.compose.BackHandler(inEdit) { editMode = false; order = null; held = null; dx = 0f }
 
     Column(Modifier.fillMaxWidth()) {
-        if (manage) Row(
-            Modifier.fillMaxWidth().padding(horizontal = horizontalPadding),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AnimatedVisibility(
-                visible = inEdit,
-                modifier = Modifier.weight(1f, fill = false),
-                enter = fadeIn(tween(180)) + expandHorizontally(tween(220), Alignment.End),
-                exit = fadeOut(tween(120)) + shrinkHorizontally(tween(180), Alignment.End),
-            ) {
-                Text(
-                    T("Drag to reorder, tap to edit", "גררו לסידור, הקישו לעריכה"),
-                    fontSize = 12.sp, color = K.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(end = K.gap2),
-                )
-            }
-            val penPlate by animateColorAsState(
-                if (inEdit) K.accent.copy(alpha = .16f) else K.plate, tween(220), label = "penPlate",
-            )
-            val penTint by animateColorAsState(if (inEdit) K.accent else K.muted, tween(220), label = "penTint")
-            Box(
-                Modifier.size(38.dp).clip(RoundedCornerShape(999.dp))
-                    .background(penPlate)
-                    .clickable(
-                        role = Role.Button,
-                        onClickLabel = if (inEdit) T("Finish editing favourites", "סיום עריכת המועדפים")
-                        else T("Sort and remove favourites", "סידור והסרה של מועדפים"),
-                    ) {
-                        editMode = !editMode
-                        order = null; held = null; dx = 0f
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                AnimatedContent(
-                    inEdit,
-                    transitionSpec = {
-                        (fadeIn(tween(160)) + scaleIn(tween(220), initialScale = .6f)) togetherWith
-                            (fadeOut(tween(120)) + scaleOut(tween(180), targetScale = .6f))
-                    },
-                    label = "penGlyph",
-                ) { editing ->
-                    Icon(
-                        if (editing) Icons.Rounded.Check else Icons.Rounded.Edit,
-                        contentDescription = null,
-                        tint = penTint,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-        }
         Row(
             Modifier.fillMaxWidth()
                 .horizontalScroll(rememberScrollState(), enabled = held == null)
@@ -253,12 +205,12 @@ fun FavouriteStrip(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Box(
-                            Modifier.size(46.dp).clip(RoundedCornerShape(999.dp))
-                                .background(if (set) K.accent.copy(alpha = .16f) else K.plate)
+                            Modifier.size(46.dp).clip(RoundedCornerShape(14.dp))
+                                .background(if (set) K.accent.copy(alpha = .16f) else K.surface1.copy(alpha = .62f))
                                 .border(
-                                    1.dp,
-                                    if (lifted) K.accent else if (set) K.accent.copy(alpha = .5f) else K.border,
-                                    RoundedCornerShape(999.dp),
+                                    if (set || lifted) 1.dp else 0.5.dp,
+                                    if (lifted) K.accent else if (set) K.accent.copy(alpha = .5f) else K.text.copy(alpha = .14f),
+                                    RoundedCornerShape(14.dp),
                                 ),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -288,7 +240,11 @@ fun FavouriteStrip(
                     Text(f.label, fontSize = 12.sp, color = if (set) K.text else K.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            StripTile(
+            if (manage) EditControls(
+                editing = inEdit,
+                onToggle = { editMode = !editMode; order = null; held = null; dx = 0f },
+                onAdd = onAdd,
+            ) else StripTile(
                 Icons.Rounded.Add,
                 T("Add", "הוספה"),
                 T("Add a favourite", "הוספת מועדף"),
@@ -296,6 +252,56 @@ fun FavouriteStrip(
                 onClick = onAdd,
             )
         }
+        AnimatedVisibility(
+            visible = inEdit,
+            enter = fadeIn(tween(180)) + expandVertically(tween(220)),
+            exit = fadeOut(tween(120)) + shrinkVertically(tween(180)),
+        ) {
+            Text(
+                T("Drag to reorder, tap to edit", "גררו לסידור, הקישו לעריכה"),
+                fontSize = 12.sp, color = K.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = horizontalPadding),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EditControls(editing: Boolean, onToggle: () -> Unit, onAdd: () -> Unit) {
+    val slotPx = with(LocalDensity.current) { SLOT.toPx() }
+    val travel by animateFloatAsState(
+        if (editing) 1f else 0f,
+        spring(dampingRatio = .58f, stiffness = Spring.StiffnessMediumLow), label = "editTravel",
+    )
+    Box(Modifier.width(72.dp + SLOT * travel.coerceIn(0f, 1f))) {
+        StripTile(
+            Icons.Rounded.Add,
+            T("Add", "הוספה"),
+            T("Add a favourite", "הוספת מועדף"),
+            on = false,
+            onClick = onAdd,
+            enabled = editing,
+            modifier = Modifier.graphicsLayer {
+                val grown = .3f + .7f * travel.coerceAtLeast(0f)
+                alpha = travel.coerceIn(0f, 1f)
+                scaleX = grown
+                scaleY = grown
+            },
+        )
+        val flipped = travel > .5f
+        StripTile(
+            if (flipped) Icons.Rounded.Check else Icons.Rounded.Edit,
+            if (flipped) T("Done", "סיום") else T("Edit", "עריכה"),
+            if (editing) T("Finish editing favourites", "סיום עריכת המועדפים")
+            else T("Sort and remove favourites", "סידור והסרה של מועדפים"),
+            on = editing,
+            onClick = onToggle,
+            modifier = Modifier.offset { IntOffset((slotPx * travel).roundToInt(), 0) },
+            iconModifier = Modifier.graphicsLayer {
+                rotationY = travel * 180f - if (flipped) 180f else 0f
+                cameraDistance = 12f * density
+            },
+        )
     }
 }
 
@@ -303,8 +309,7 @@ fun FavouriteStrip(
 private fun PlaceLine(f: Favourite, onChange: () -> Unit) {
     val p = f.place
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(K.rControl))
-            .background(K.plate)
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).panel(K.rControl)
             .clickable(
                 role = Role.Button,
                 onClickLabel = T("Change where ${f.label} is", "שינוי המיקום של ${f.label}"),
@@ -336,21 +341,29 @@ private fun StripTile(
     description: String,
     on: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    iconModifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
+    val fill by animateColorAsState(
+        if (on) K.accent.copy(alpha = .16f) else K.surface1.copy(alpha = .62f), tween(220), label = "tileFill",
+    )
+    val edge by animateColorAsState(if (on) K.accent else K.text.copy(alpha = .14f), tween(220), label = "tileEdge")
+    val ink by animateColorAsState(if (on) K.accent else K.muted, tween(220), label = "tileInk")
     Column(
-        Modifier.width(72.dp).clip(RoundedCornerShape(K.rControl))
-            .clickable(role = Role.Button, onClick = onClick)
+        modifier.width(72.dp).clip(RoundedCornerShape(K.rControl))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(vertical = K.gap2),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            Modifier.size(46.dp).clip(RoundedCornerShape(999.dp))
-                .background(if (on) K.accent.copy(alpha = .16f) else K.plate)
-                .border(1.dp, if (on) K.accent else K.border, RoundedCornerShape(999.dp)),
+            Modifier.size(46.dp).clip(RoundedCornerShape(14.dp))
+                .background(fill)
+                .border(if (on) 1.dp else 0.5.dp, edge, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center,
-        ) { Icon(icon, contentDescription = description, tint = if (on) K.accent else K.muted, modifier = Modifier.size(24.dp)) }
+        ) { Icon(icon, contentDescription = description, tint = ink, modifier = iconModifier.size(24.dp)) }
         Spacer(Modifier.height(5.dp))
-        Text(label, fontSize = 12.sp, color = if (on) K.accent else K.muted)
+        Text(label, fontSize = 12.sp, color = ink)
     }
 }
 
@@ -366,7 +379,7 @@ fun FavouriteEditor(
     var icon by remember { mutableStateOf(existing?.icon ?: "star") }
     Dialog(onDismissRequest = onDismiss) {
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(K.rCard)).background(K.surface1).padding(K.gap4),
+            Modifier.fillMaxWidth().panel(K.rCard, solid = true).padding(K.gap4),
             verticalArrangement = Arrangement.spacedBy(K.gap3),
         ) {
             Text(
@@ -394,13 +407,13 @@ fun FavouriteEditor(
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
                 if (onRemove != null) Box(
-                    Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(K.rPill)).background(K.plateStrong)
+                    Modifier.heightIn(min = 44.dp).panel(K.rPill)
                         .clickable(role = Role.Button, onClick = onRemove).padding(horizontal = K.gap4),
                     contentAlignment = Alignment.Center,
                 ) { Text(T("Remove", "הסרה"), fontSize = 14.sp, color = K.critical) }
                 Spacer(Modifier.weight(1f))
                 Box(
-                    Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(K.rPill)).background(K.plateStrong)
+                    Modifier.heightIn(min = 44.dp).panel(K.rPill)
                         .clickable(role = Role.Button, onClick = onDismiss).padding(horizontal = K.gap4),
                     contentAlignment = Alignment.Center,
                 ) { Text(T("Cancel", "ביטול"), fontSize = 14.sp, color = K.text) }
@@ -411,7 +424,7 @@ fun FavouriteEditor(
                         .clickable(enabled = ready, role = Role.Button) { onSave(name.trim().ifBlank { existing?.name ?: "" }, icon) }
                         .padding(horizontal = K.gap4),
                     contentAlignment = Alignment.Center,
-                ) { Text(if (existing == null) T("Next", "הבא") else T("Save", "שמירה"), fontSize = 14.sp, color = if (ready) K.bg else K.muted, fontWeight = FontWeight.Medium) }
+                ) { Text(if (existing == null) T("Next", "הבא") else T("Save", "שמירה"), fontSize = 14.sp, color = if (ready) K.onAccent else K.muted, fontWeight = FontWeight.Medium) }
             }
         }
     }

@@ -19,6 +19,10 @@ object Moovit {
     const val CLIENT_VERSION = "5.199.1.1804"
     private const val APP4 = "https://app4.moovitapp.com/services-app/services/"
     private const val APP5 = "https://app5.moovitapp.com/services-app/services/"
+
+    @Volatile
+    var shareLocation = true
+    private val NEUTRAL = 32.0755 to 34.7755
     @Volatile
     private var metroRev: String = "1788783184120"
 
@@ -35,10 +39,12 @@ object Moovit {
         return true
     }
 
-    private fun post(base: String, path: String, body: ByteArray, headers: Map<String, String>): Pair<Int, ByteArray> {
+    private fun post(
+        base: String, path: String, body: ByteArray, headers: Map<String, String>, readMs: Int = 25000,
+    ): Pair<Int, ByteArray> {
         repeat(2) { attempt ->
             val c = (URL(base + path).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"; doOutput = true; connectTimeout = 20000; readTimeout = 25000
+                requestMethod = "POST"; doOutput = true; connectTimeout = 20000; readTimeout = readMs
                 for ((k, v) in withRev(headers)) setRequestProperty(k, v)
             }
             c.outputStream.use { it.write(body) }
@@ -76,13 +82,14 @@ object Moovit {
         stop()
     }.bytes()
 
-    fun register(lat: Double = 32.0755, lon: Double = 34.7755): MoovitSession {
+    fun register(lat: Double = NEUTRAL.first, lon: Double = NEUTRAL.second): MoovitSession {
+        val (la, lo) = if (shareLocation) lat to lon else NEUTRAL
         val h = mapOf(
             "Content-Type" to "application/octet", "Accept" to "application/json",
             "Accept-Encoding" to "gzip", "User-Agent" to "ktor-client",
             "api_key" to APP_ID, "client_version" to CLIENT_VERSION, "phone_type" to "2",
         )
-        val (code, raw) = post(APP4, "UserAuth/CreateUser", createUserBody(lat, lon), h)
+        val (code, raw) = post(APP4, "UserAuth/CreateUser", createUserBody(la, lo), h)
         if (code != 200) throw RuntimeException("CreateUser HTTP $code")
         val rec = JSONObject(String(raw, Charsets.UTF_8)).getJSONObject("1").getJSONObject("rec")
         val tokens = rec.getJSONObject("7").getJSONObject("rec").getJSONObject("1").getJSONObject("rec")
@@ -290,57 +297,6 @@ object Moovit {
 
     class Stop(val id: Int, val lat: Double, val lon: Double, val name: String)
 
-    @Suppress("UNCHECKED_CAST")
-    private fun extractStops(tree: Map<Int, Any?>, out: ArrayList<Stop>) {
-        for (v in tree.values) {
-            if (v is Map<*, *>) {
-                val m = v as Map<Int, Any?>
-                val la = m[1] as? Int; val lo = m[2] as? Int
-                if (la != null && lo != null && la in 29_000_000..34_000_000 && lo in 33_000_000..36_000_000) {
-                    val id = tree.values.firstOrNull { it is Int && it in 100..50_000_000 } as? Int
-                    val nm = tree.values.firstOrNull { it is String && it.isNotEmpty() } as? String ?: ""
-                    if (id != null) out.add(Stop(id, la / 1e6, lo / 1e6, nm))
-                }
-                extractStops(m, out)
-            } else if (v is List<*>) {
-                for (e in v) if (e is Map<*, *>) extractStops(e as Map<Int, Any?>, out)
-            }
-        }
-    }
-
-    fun stopPages(s: MoovitSession, fromId: Int, pages: Int, onPage: () -> Unit = {}): List<Stop> {
-        val h = authHeaders(s)
-        val out = ArrayList<Stop>()
-        var frm = fromId - fromId % 100
-        repeat(pages) {
-            val qs = "V5/Entities/EntitiesPage?entities_count=100&entity_type=3&from_entity_id=$frm" +
-                "&metro_area_id=${s.metroId}&metro_revision=$metroRev&protocol_version=1&resolve_references=false"
-            val (code, raw) = get(APP4CDN, qs, h)
-            if (code != 200) throw java.io.IOException("EntitiesPage HTTP $code")
-            extractStops(TReader(raw).readStruct(), out)
-            frm += 100
-            onPage()
-        }
-        return out.distinctBy { it.id }
-    }
-
-    const val STOP_ID_CEILING = 60_000
-
-    fun nearbyStops(
-        stops: List<Stop>,
-        lat: Double,
-        lon: Double,
-        k: Int = 15,
-        radiusKm: Double = 0.0,
-        floor: Int = 12,
-    ): List<Stop> {
-        fun d(s: Stop) = Math.hypot((s.lat - lat) * 111, (s.lon - lon) * 93)
-        val sorted = stops.sortedBy { d(it) }
-        if (radiusKm <= 0.0) return sorted.take(k)
-        val within = sorted.takeWhile { d(it) <= radiusKm }
-        return (if (within.size >= floor) within else sorted.take(floor)).take(k)
-    }
-
     class LineInfo(
         val groupId: Int,
         val number: String,
@@ -470,24 +426,25 @@ object Moovit {
         val meters: Int = -1,
     )
 
-    private fun searchBody(query: String, lat: Double, lon: Double, metroId: Int): ByteArray =
+    private fun searchBody(
+        query: String, at: Pair<Double, Double>?, metroId: Int, sections: List<Int> = listOf(2, 3, 4, 5),
+    ): ByteArray =
         TWriter().apply {
             strField(1, query)
             i32Field(2, metroId)
-            structField(3, latlon(lat, lon))
+            at?.let { structField(3, latlon(it.first, it.second)) }
             i16Field(4, 0)
-            boolField(5, true)
-            boolField(7, true)
-            i32ListField(8, listOf(1, 2, 3, 4, 5))
+            i32ListField(8, sections)
             structField(9, locale())
-            boolField(10, true)
             stop()
         }.bytes()
 
-    fun searchPlaces(s: MoovitSession, query: String, lat: Double, lon: Double): List<Place> {
+    // From six letters on, Moovit's app asks Google with a key only it may use, so Kav keeps asking Moovit.
+    fun searchPlaces(s: MoovitSession, query: String, at: Pair<Double, Double>?): List<Place> {
         if (query.isBlank()) return emptyList()
+        val where = at?.takeIf { shareLocation }
         val h = authHeaders(s) + mapOf("Accept" to "application/json")
-        val (code, raw) = post(APP5, "V4/CloudSearch/FullSearch", searchBody(query, lat, lon, s.metroId), h)
+        val (code, raw) = post(APP5, "V4/CloudSearch/FullSearch", searchBody(query, where, s.metroId), h, readMs = 2500)
         if (code != 200) throw RuntimeException("Search HTTP $code")
         val root = JSONObject(String(raw, Charsets.UTF_8))
         val out = ArrayList<Place>()
@@ -505,7 +462,42 @@ object Moovit {
                 meters = (jInt(item, "11") ?: -1L).toInt(),
             ))
         }
-        return out.sortedBy { if (it.meters >= 0) it.meters else Int.MAX_VALUE }
+        return out.take(5)
+    }
+
+    // The timetable keys stops by GTFS code, so Moovit's own id comes from a search.
+    fun searchStopId(s: MoovitSession, name: String, at: Pair<Double, Double>): Int? {
+        if (name.isBlank()) return null
+        val h = authHeaders(s) + mapOf("Accept" to "application/json")
+        val (code, raw) = post(
+            APP5, "V4/CloudSearch/FullSearch", searchBody(name, at, s.metroId, sections = listOf(1)), h, readMs = 2500,
+        )
+        if (code != 200) throw RuntimeException("Search HTTP $code")
+        val root = JSONObject(String(raw, Charsets.UTF_8))
+        var best: Int? = null
+        var bestD = 120.0
+        forEachItem(jList(root, "2")) { item ->
+            if ((jInt(item, "1") ?: 0L).toInt() != 1) return@forEachItem
+            val id = (jInt(item, "2") ?: return@forEachItem).toInt()
+            val ll = jRec(item, "6") ?: return@forEachItem
+            val d = Math.hypot(
+                ((jInt(ll, "1") ?: 0L) / 1e6 - at.first) * 111_000,
+                ((jInt(ll, "2") ?: 0L) / 1e6 - at.second) * 93_000,
+            )
+            if (d < bestD) { best = id; bestD = d }
+        }
+        return best
+    }
+
+    fun stopImages(s: MoovitSession, stopId: Int): List<String> {
+        val h = authHeaders(s) + mapOf("Accept" to "application/json")
+        val body = TWriter().apply { i32Field(1, stopId); stop() }.bytes()
+        val (code, raw) = post(APP5, "V5/StopImages/GetStopImages", body, h, readMs = 4000)
+        if (code != 200) return emptyList()
+        val root = JSONObject(String(raw, Charsets.UTF_8))
+        val out = ArrayList<String>()
+        forEachItem(jList(root, "1")) { img -> jStr(img, "1")?.let { out.add(it) } }
+        return out
     }
 
     enum class LegKind { WALK, WAIT, RIDE, TAXI, BIKE, OTHER }
@@ -924,6 +916,11 @@ object Moovit {
     ) {
         fun arrival(ride: Leg): Arrival? = live[ArrivalKey(ride.fromStop, ride.tripId)]
 
+        fun liveFor(ride: Leg): List<Arrival> = live.values.filter { a ->
+            a.stopId == ride.fromStop && a.lineId == ride.lineId &&
+                patterns[a.patternId]?.contains(ride.toStop) == true
+        }.sortedBy { it.departure().timeUtc }
+
         fun platform(ride: Leg, wait: Leg? = null): String =
             arrival(ride)?.platform?.ifBlank { null }
                 ?: departures(ride, wait).firstOrNull { it.platform.isNotBlank() }?.platform
@@ -939,11 +936,8 @@ object Moovit {
             val alert = boarding?.alertCategory ?: 0
             val planned = (listOf(selected.copy(alert = alert)) + future.filter { it.tripId != ride.tripId })
                 .distinctBy { it.tripId to if (it.tripId == 0L) it.timeUtc else 0L }
-            val current = live.values.filter { a ->
-                a.stopId == ride.fromStop && a.lineId == ride.lineId &&
-                    patterns[a.patternId]?.contains(ride.toStop) == true
-            }.map { it.departure(alert) }
-            if (current.isNotEmpty()) return current.sortedBy { it.timeUtc }
+            val current = liveFor(ride).map { it.departure(alert) }
+            if (current.isNotEmpty()) return current
             return planned.sortedBy { it.timeUtc }
         }
 
@@ -1035,11 +1029,7 @@ object Moovit {
         if (missing.isEmpty()) return out
         val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(8, missing.size))
         try {
-            val jobs = missing.map { id -> id to pool.submit<List<Int>> {
-                val stops = entity(s, 13, id)?.let { tripPatternOf(id, it) }.orEmpty()
-                if (stops.isNotEmpty()) patternCache[metroRev to id] = stops
-                stops
-            } }
+            val jobs = missing.map { id -> id to pool.submit<List<Int>> { tripPattern(s, id) } }
             for ((id, job) in jobs) runCatching { job.get() }.getOrNull()
                 ?.takeIf { it.isNotEmpty() }?.let { out[id] = it }
         } finally {
@@ -1049,6 +1039,14 @@ object Moovit {
     }
 
     private val patternCache = java.util.concurrent.ConcurrentHashMap<Pair<String, Int>, List<Int>>()
+
+    fun tripPattern(s: MoovitSession, id: Int): List<Int> {
+        if (id <= 0) return emptyList()
+        patternCache[metroRev to id]?.let { return it }
+        val stops = entity(s, 13, id)?.let { tripPatternOf(id, it) }.orEmpty()
+        if (stops.isNotEmpty()) patternCache[metroRev to id] = stops
+        return stops
+    }
 
     @Suppress("UNCHECKED_CAST")
     internal fun tripPatternOf(id: Int, entity: Map<Int, Any?>): List<Int> {

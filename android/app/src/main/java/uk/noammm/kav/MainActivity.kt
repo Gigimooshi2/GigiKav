@@ -36,25 +36,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.haze
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
@@ -119,9 +122,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        Prefs.upgrade(this)
         K.accent = Color(Prefs.accent(this))
+        K.applyTheme(Prefs.look(this))
+        K.liquid = Prefs.liquidGlass(this)
         Shown.co2 = Prefs.showCo2(this)
+        Moovit.shareLocation = !Prefs.privateSearch(this)
         MapFile.init(this)
+        StopPhotos.init(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             addOnPictureInPictureModeChangedListener { Pip.active = it.isInPictureInPictureMode }
         }
@@ -130,6 +138,13 @@ class MainActivity : ComponentActivity() {
             MoovitLink.parse(intent?.dataString)?.let { PendingLink.plan = it }
         }
         setContent {
+            val light = K.light
+            val view = androidx.compose.ui.platform.LocalView.current
+            androidx.compose.runtime.SideEffect {
+                val bars = androidx.core.view.WindowCompat.getInsetsController(window, view)
+                bars.isAppearanceLightStatusBars = light
+                bars.isAppearanceLightNavigationBars = light
+            }
             KavTheme {
                 CompositionLocalProvider(
                     LocalLayoutDirection provides if (T.rtl) LayoutDirection.Rtl else LayoutDirection.Ltr,
@@ -224,7 +239,10 @@ class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
         favourites = Prefs.favourites(ctx)
         filters = Prefs.filters(ctx)
         K.accent = Color(Prefs.accent(ctx))
+        K.applyTheme(Prefs.look(ctx))
+        K.liquid = Prefs.liquidGlass(ctx)
         Shown.co2 = Prefs.showCo2(ctx)
+        Moovit.shareLocation = !Prefs.privateSearch(ctx)
         T.switchTo(Prefs.lang(ctx))
     }
 
@@ -300,9 +318,13 @@ private fun Root() {
     val app = ctx.applicationContext
     val model: KavModel = viewModel { KavModel(Loaded.net, app) }
     LaunchedEffect(model) { if (!model.updateChecked) model.checkForUpdate(app) }
+    var pickLook by remember { mutableStateOf(Prefs.pickLook(ctx)) }
+    var pickSupport by remember { mutableStateOf(Prefs.pickSupport(ctx)) }
     Box(Modifier.fillMaxSize()) {
         Shell(model)
         if (Pip.active) PipOverlay(model)
+        else if (pickLook) LookPrompt { Prefs.lookPicked(ctx); pickLook = false }
+        else if (pickSupport) SupportPrompt { Prefs.supportShown(ctx); pickSupport = false }
         else if (PendingBackup.uri != null) ImportPrompt(model)
         else {
             UpdatePrompt(model)
@@ -380,12 +402,8 @@ private fun Shell(model: KavModel) {
     LaunchedEffect(model, model.activeJourney?.trip) {
         while (true) {
             val journey = model.activeJourney ?: break
-            val session = Online.session ?: try {
-                withContext(Dispatchers.IO) {
-                    val at = journey.trip.legs.firstOrNull { it.shape.isNotEmpty() }?.shape?.first()
-                        ?: model.here ?: (32.0759 to 34.7745)
-                    Moovit.register(at.first, at.second)
-                }.also { Online.session = it }
+            val session = try {
+                Online.open(journey.trip.legs.firstOrNull { it.shape.isNotEmpty() }?.shape?.first() ?: model.here ?: (32.0759 to 34.7745))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -453,17 +471,7 @@ private fun Shell(model: KavModel) {
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) askNotice.launch(Manifest.permission.POST_NOTIFICATIONS)
         while (true) {
-            model.activeJourney?.let { journey ->
-                val steps = buildSteps(journey.trip, journey.fromLabel, journey.toLabel)
-                if (steps.isNotEmpty()) {
-                    val index = model.journeyStep.coerceIn(0, steps.lastIndex)
-                    val (title, detail) = stepInstruction(
-                        steps[index], journey, index == steps.lastIndex - 1,
-                        System.currentTimeMillis() / 1000,
-                    )
-                    TripService.show(ctx, title, detail, index)
-                }
-            }
+            if (model.activeJourney != null) TripService.show(ctx)
             withTimeoutOrNull(30_000) {
                 snapshotFlow { model.activeJourney to model.journeyStep }.drop(1).first()
             }
@@ -471,7 +479,13 @@ private fun Shell(model: KavModel) {
     }
     DisposableEffect(Unit) {
         TripBridge.end = { model.activeJourney = null }
-        onDispose { TripBridge.end = null }
+        TripBridge.journey = { model.activeJourney?.let { it to model.journeyStep } }
+        TripBridge.fix = { model.locate(it.lat, it.lon, it.speed) }
+        onDispose {
+            TripBridge.end = null
+            TripBridge.journey = null
+            TripBridge.fix = null
+        }
     }
     LaunchedEffect(model.activeJourney?.trip) {
         val journey0 = model.activeJourney ?: return@LaunchedEffect
@@ -538,16 +552,10 @@ private fun Shell(model: KavModel) {
         (ctx as? ComponentActivity)?.finish()
     }
 
-    val backdrop = remember { HazeState() }
-    CompositionLocalProvider(LocalGlassBackdrop provides backdrop) {
+    val liquid = rememberLiquidBackdrop()
+    CompositionLocalProvider(LocalLiquidBackdrop provides liquid) {
     Box(Modifier.fillMaxSize()) {
-    Canvas(Modifier.fillMaxSize().haze(backdrop)) {
-        drawRect(K.bg)
-        drawRect(Brush.radialGradient(listOf(K.surface2, Color.Transparent),
-            center = Offset(size.width * .95f, size.height * .05f), radius = size.width * 1.3f))
-        drawRect(Brush.radialGradient(listOf(K.surface2, Color.Transparent),
-            center = Offset(size.width * .05f, size.height * .78f), radius = size.width))
-    }
+    Box(Modifier.fillMaxSize().background(K.bg))
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
@@ -563,7 +571,9 @@ private fun Shell(model: KavModel) {
         Box(Modifier.padding(
             start = pad.calculateStartPadding(direction), top = pad.calculateTopPadding(),
             end = pad.calculateEndPadding(direction),
-        ).fillMaxSize().clipToBounds()) {
+        ).fillMaxSize().clipToBounds()
+            .then(if (K.liquid && liquid != null) Modifier.liquidSource(liquid) else Modifier)) {
+        CompositionLocalProvider(LocalLiquidBackdrop provides null) {
             androidx.compose.animation.Crossfade(model.tab, label = "tab") { tab ->
                 when (tab) {
                     Tab.Directions -> DirectionsOnline(model)
@@ -576,10 +586,12 @@ private fun Shell(model: KavModel) {
                 model.settingsOpen,
                 enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)) +
                     androidx.compose.animation.slideInVertically(androidx.compose.animation.core.tween(240)) { it / 10 },
-                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)),
+                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(200)) +
+                    androidx.compose.animation.slideOutVertically(androidx.compose.animation.core.tween(220)) { it / 10 },
             ) {
                 SettingsScreen(model) { model.settingsOpen = false }
             }
+        }
         }
         }
     }
@@ -630,8 +642,88 @@ private fun ImportPrompt(model: KavModel) {
                                 .onFailure { e -> failed = importError(e) }
                         },
                     contentAlignment = Alignment.Center,
-                ) { Text(T("Import", "ייבוא"), fontSize = 15.sp, color = K.bg, fontWeight = FontWeight.Medium) }
+                ) { Text(T("Import", "ייבוא"), fontSize = 15.sp, color = K.onAccent, fontWeight = FontWeight.Medium) }
             }
+        }
+    }
+}
+
+@Composable
+private fun LookPrompt(onDone: () -> Unit) {
+    Dialog(onDismissRequest = {}, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(K.rCard)).background(K.surface1).padding(K.gap5),
+        ) {
+            Text(T("Pick a look", "בחרו מראה"), fontSize = 19.sp, color = K.text, fontWeight = FontWeight.SemiBold)
+            Text(
+                T(
+                    "Kav 2.0 comes in OLED black, light and dark, with liquid glass or solid on top. " +
+                        "You can change this later in Settings.",
+                    "Kav 2.0 מגיעה בשחור OLED, בבהיר ובכהה, עם זכוכית נוזלית או משטחים אטומים. " +
+                        "אפשר לשנות את זה אחר כך בהגדרות.",
+                ),
+                fontSize = 14.sp, color = K.dim, lineHeight = 20.sp, modifier = Modifier.padding(top = K.gap2),
+            )
+            LookChoices { Text(it, style = DisplayItalic, fontSize = 12.sp, color = K.dim, modifier = Modifier.padding(top = K.gap4, bottom = K.gap2)) }
+            Box(
+                Modifier.padding(top = K.gap5).fillMaxWidth().heightIn(min = 46.dp).clip(RoundedCornerShape(K.rPill))
+                    .background(K.accent).clickable(role = Role.Button, onClick = onDone),
+                contentAlignment = Alignment.Center,
+            ) { Text(T("Done", "סיום"), fontSize = 15.sp, color = K.onAccent, fontWeight = FontWeight.Medium) }
+        }
+    }
+}
+
+// Shown once per install: after setup, or after the look prompt on an update.
+@Composable
+private fun SupportPrompt(onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    Dialog(onDismissRequest = onDone) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(K.rCard)).background(K.surface1).padding(K.gap5),
+        ) {
+            Text(T("Enjoying Kav?", "נהנים מקו?"), fontSize = 19.sp, color = K.text, fontWeight = FontWeight.SemiBold)
+            Text(
+                T(
+                    "Kav is made to protect every user's privacy and to make riding the bus a little more " +
+                        "bearable (as much as possible).",
+                    "קו מפותחת במטרה לשמור על הפרטיות של כל משתמש ולהפוך את השימוש באוטובוסים לחוויה " +
+                        "נסבלת יותר (כמה שאפשר).",
+                ),
+                fontSize = 14.sp, color = K.dim, lineHeight = 20.sp, modifier = Modifier.padding(top = K.gap2),
+            )
+            Text(
+                buildAnnotatedString {
+                    append(T(
+                        "If you'd like to support Kav's development, you're welcome to tap the button below. " +
+                            "If that's not an option for you, you can show your support with ",
+                        "אם תרצו לתרום להמשך הפיתוח של האפליקציה, אתם מוזמנים ללחוץ על הכפתור למטה. " +
+                            "אם אין לכם אפשרות, אתם מוזמנים להביע תמיכה דרך ",
+                    ))
+                    withLink(LinkAnnotation.Url(REPO_URL, TextLinkStyles(SpanStyle(color = K.accent)))) {
+                        append(T("a star on GitHub", "כוכב בגיטהאב"))
+                    }
+                    append(".")
+                },
+                fontSize = 14.sp, color = K.dim, lineHeight = 20.sp, modifier = Modifier.padding(top = K.gap2),
+            )
+            Text(
+                T(
+                    "*Donating is just a thank-you and 100% optional. You won't lose any features if you can't :)",
+                    "*תרומה היא אות הערכה בלבד, והיא אופציונלית לגמרי. לא תאבדו אף פיצ'ר אם אין ביכולתכם לתרום :)",
+                ),
+                fontSize = 11.sp, color = K.dim, lineHeight = 16.sp, modifier = Modifier.padding(top = K.gap3),
+            )
+            Box(
+                Modifier.padding(top = K.gap5).fillMaxWidth().heightIn(min = 46.dp).clip(RoundedCornerShape(K.rPill))
+                    .background(K.accent).clickable(role = Role.Button) { openLink(ctx, COFFEE_URL); onDone() },
+                contentAlignment = Alignment.Center,
+            ) { Text(T("Buy me a coffee", "קנו לי קפה"), fontSize = 15.sp, color = K.onAccent, fontWeight = FontWeight.Medium) }
+            Box(
+                Modifier.padding(top = K.gap2).fillMaxWidth().heightIn(min = 46.dp).clip(RoundedCornerShape(K.rPill))
+                    .background(K.plateStrong).clickable(role = Role.Button, onClick = onDone),
+                contentAlignment = Alignment.Center,
+            ) { Text(T("Have you seen the economy??", "ראית את מצב האקונומיה??"), fontSize = 15.sp, color = K.text) }
         }
     }
 }
@@ -655,7 +747,7 @@ private fun ExitPrompt(onStay: () -> Unit, onExit: () -> Unit) {
                     Modifier.weight(1f).heightIn(min = 46.dp).clip(RoundedCornerShape(K.rPill)).background(K.accent)
                         .clickable(role = Role.Button, onClick = onExit),
                     contentAlignment = Alignment.Center,
-                ) { Text(T("Exit", "יציאה"), fontSize = 15.sp, color = K.bg, fontWeight = FontWeight.Medium) }
+                ) { Text(T("Exit", "יציאה"), fontSize = 15.sp, color = K.onAccent, fontWeight = FontWeight.Medium) }
             }
         }
     }
@@ -960,8 +1052,46 @@ object Prefs {
     fun showCo2(ctx: Context): Boolean = store(ctx).getBoolean("showCo2", false)
     fun setShowCo2(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("showCo2", on).apply()
 
+    private val looks = Look.entries.map { it.name.lowercase() }
+
+    fun look(ctx: Context): Look =
+        Look.entries.firstOrNull { it.name.lowercase() == store(ctx).getString("look", null) } ?: Look.OLED
+    fun setLook(ctx: Context, look: Look) = store(ctx).edit().putString("look", look.name.lowercase()).apply()
+
+    fun liquidGlass(ctx: Context): Boolean = liquidGlassReady && store(ctx).getBoolean("liquidGlass", true)
+    fun setLiquidGlass(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("liquidGlass", on).apply()
+
+    fun privateSearch(ctx: Context): Boolean = store(ctx).getBoolean("privateSearch", true)
+    fun setPrivateSearch(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("privateSearch", on).apply()
+
     fun onboarded(ctx: Context): Boolean = store(ctx).getBoolean("onboarded", false)
-    fun setOnboarded(ctx: Context) = store(ctx).edit().putBoolean("onboarded", true).apply()
+    fun setOnboarded(ctx: Context) = store(ctx).edit().putBoolean("onboarded", true).putBoolean("pickSupport", true).apply()
+
+    fun pickLook(ctx: Context): Boolean = store(ctx).getBoolean("pickLook", false)
+    fun lookPicked(ctx: Context) {
+        val e = store(ctx).edit().remove("pickLook").putString("look", K.look.name.lowercase())
+        if (liquidGlassReady) e.putBoolean("liquidGlass", K.liquid)
+        e.apply()
+    }
+
+    fun pickSupport(ctx: Context): Boolean = store(ctx).getBoolean("pickSupport", false)
+    fun supportShown(ctx: Context) = store(ctx).edit().remove("pickSupport").apply()
+
+    // Runs once, the first time 2.0 opens on an install that had an older version.
+    fun upgrade(ctx: Context) {
+        val s = store(ctx)
+        if (s.getInt("prefsVersion", 0) >= 2) return
+        val e = s.edit()
+        s.getStringSet("filtersOff", null)?.let { off ->
+            val cable = if ("CARMELIT" in off && "RAKAVLIT" in off) setOf("CARMELIT_RAKAVLIT") else emptySet()
+            e.putStringSet("filtersOff", off - setOf("CARMELIT", "RAKAVLIT", "SHARE_TAXI") + cable)
+        }
+        if (s.getBoolean("onboarded", false)) {
+            e.putBoolean("privateSearch", true).putBoolean("pickLook", true).putBoolean("pickSupport", true)
+        }
+        e.putInt("prefsVersion", 2).apply()
+        java.io.File(ctx.filesDir, "moovit-stops.bin").delete()
+    }
 
     fun filters(ctx: Context): Set<ResultFilter> {
         val off = store(ctx).getStringSet("filtersOff", emptySet()).orEmpty()
@@ -973,31 +1103,57 @@ object Prefs {
         store(ctx).edit().putStringSet("filtersOff", off).apply()
     }
 
+    private val oldFilters = setOf(
+        ResultFilter.BUS, ResultFilter.TRAIN, ResultFilter.LIGHT_RAIL, ResultFilter.TAXI, ResultFilter.BIKE, ResultFilter.WALK,
+    )
+
     fun backupJson(ctx: Context): org.json.JSONObject {
         val s = store(ctx)
         fun arr(key: String) =
             runCatching { org.json.JSONArray(s.getString(key, "[]")) }.getOrElse { org.json.JSONArray() }
+        val on = filters(ctx)
+        // 1.5 reads filtersOff, where Carmelit and Rakavlit are apart and share taxis have their own switch.
+        val off = ResultFilter.entries.filter { it !in on }.map { it.name } +
+            (if (ResultFilter.CARMELIT_RAKAVLIT in on) emptyList() else listOf("CARMELIT", "RAKAVLIT")) +
+            (if (ResultFilter.BUS in on) emptyList() else listOf("SHARE_TAXI"))
         return org.json.JSONObject()
             .put("favourites", arr("favourites"))
             .put("trips", arr("trips"))
             .put("recents", arr("recents"))
+            .put("recentLines", arr(RECENT_LINES))
             .put("lang", lang(ctx).code)
             .put("accent", accent(ctx))
-            .put("filtersOff", org.json.JSONArray(s.getStringSet("filtersOff", emptySet()).orEmpty().toList()))
+            .put("look", look(ctx).name.lowercase())
+            .put("liquidGlass", s.getBoolean("liquidGlass", true))
+            .put("privateSearch", privateSearch(ctx))
+            .put("filters", org.json.JSONObject().apply { ResultFilter.entries.forEach { put(it.name, it in on) } })
+            .put("filtersOff", org.json.JSONArray(off))
             .put("showCo2", showCo2(ctx))
     }
 
+    // Only what the file holds is restored, so settings an older backup lacks stay as they are.
     fun restoreBackup(ctx: Context, o: org.json.JSONObject) {
+        val on = filters(ctx)
         val e = store(ctx).edit()
-        for (key in listOf("favourites", "trips", "recents")) {
+        for (key in listOf("favourites", "trips", "recents", RECENT_LINES)) {
             o.optJSONArray(key)?.let { e.putString(key, it.toString()) }
         }
         if (o.has("lang")) e.putString("lang", o.optString("lang"))
         if (o.has("accent")) e.putInt("accent", o.optInt("accent"))
-        o.optJSONArray("filtersOff")?.let { a ->
-            e.putStringSet("filtersOff", (0 until a.length()).map { a.optString(it) }.toSet())
-        }
+        o.optString("look").takeIf { it in looks }?.let { e.putString("look", it) }
+        if (o.has("liquidGlass")) e.putBoolean("liquidGlass", o.optBoolean("liquidGlass"))
+        if (o.has("privateSearch")) e.putBoolean("privateSearch", o.optBoolean("privateSearch"))
         if (o.has("showCo2")) e.putBoolean("showCo2", o.optBoolean("showCo2"))
+        val chosen = o.optJSONObject("filters")
+        val oldOff = o.optJSONArray("filtersOff")?.let { a -> (0 until a.length()).map { a.optString(it) }.toSet() }
+        val off = ResultFilter.entries.filter { f ->
+            when {
+                chosen != null && chosen.has(f.name) -> !chosen.optBoolean(f.name)
+                chosen == null && oldOff != null && f in oldFilters -> f.name in oldOff
+                else -> f !in on
+            }
+        }
+        e.putStringSet("filtersOff", off.map { it.name }.toSet())
         e.apply()
     }
 

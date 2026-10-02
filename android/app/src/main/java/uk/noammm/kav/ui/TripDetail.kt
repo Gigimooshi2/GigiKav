@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
@@ -49,7 +50,6 @@ private fun shareTrip(ctx: android.content.Context, trip: Moovit.Itinerary, from
 
 private val hm = SimpleDateFormat("HH:mm", Locale.US)
 
-private enum class Node { ORIGIN, WALK, BOARD, RIDE, ALIGHT, DEST }
 
 @Composable
 fun TripDetailScreen(
@@ -134,8 +134,12 @@ private fun TripDetailBody(
             Sig(T("Your", "הנסיעה"), T("trip", "שלכם"), Modifier.weight(1f))
             val ctx = androidx.compose.ui.platform.LocalContext.current
             ShareButton { shareTrip(ctx, trip, fromLabel, toLabel) }
-            Spacer(Modifier.width(K.gap2))
-            StartButton(onStart)
+            val taxiOnly = trip.legs.any { it.kind == Moovit.LegKind.TAXI } &&
+                trip.legs.none { it.kind == Moovit.LegKind.RIDE }
+            if (!taxiOnly) {
+                Spacer(Modifier.width(K.gap2))
+                StartButton(onStart)
+            }
         }
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
@@ -178,7 +182,7 @@ private fun Summary(trip: Moovit.Itinerary, r: Moovit.Resolved) {
                 chips.forEach { c ->
                     Text(
                         c, fontSize = 14.sp, color = K.muted,
-                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(K.plate)
+                        modifier = Modifier.panel(999.dp)
                             .padding(horizontal = 10.dp, vertical = 5.dp),
                     )
                 }
@@ -217,7 +221,9 @@ fun co2(g: Int): String = if (g < 1000) T("$g g CO2e", "$g גרם CO2e") else T(
 private fun TripStrip(trip: Moovit.Itinerary, r: Moovit.Resolved) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         var first = true
+        var walking = false
         for (l in trip.legs) {
+            if (l.kind == Moovit.LegKind.WALK && (l.pathway || walking)) continue
             val glyph: @Composable () -> Unit = when (l.kind) {
                 Moovit.LegKind.WALK -> { { WalkGlyph(K.muted, 16.dp) } }
                 Moovit.LegKind.TAXI -> { { ModeGlyph(Mode.TAXI, K.muted, 17.dp) } }
@@ -226,6 +232,7 @@ private fun TripStrip(trip: Moovit.Itinerary, r: Moovit.Resolved) {
             }
             if (!first) Text(T.onward, fontSize = 13.sp, color = K.surface4)
             first = false
+            walking = l.kind == Moovit.LegKind.WALK
             glyph()
         }
     }
@@ -239,13 +246,32 @@ private fun Timeline(
     toLabel: String,
     onTrack: (Moovit.Leg, Int) -> Unit,
 ) {
+    val shaped = trip.legs.filter { it.shape.size >= 2 && it.kind != Moovit.LegKind.WALK }
+    val tints = routeTints(shaped, r)
+    fun tintOf(l: Moovit.Leg) = tints.getOrNull(shaped.indexOf(l)) ?: K.route
+    val walk = Seg(K.dim, walk = true)
+    val lastRide = trip.legs.lastOrNull { it.kind == Moovit.LegKind.RIDE }
+    fun nextFromSameStop(i: Int): Int {
+        var j = i + 1
+        while (j < trip.legs.size) {
+            val l = trip.legs[j]
+            when {
+                l.kind == Moovit.LegKind.RIDE -> return if (l.fromStop > 0 && l.fromStop == trip.legs[i].toStop) j else -1
+                l.kind == Moovit.LegKind.WAIT -> j++
+                l.kind == Moovit.LegKind.WALK && (l.pathway || (l.minutes < 1 && l.meters <= 30)) -> j++
+                else -> return -1
+            }
+        }
+        return -1
+    }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = K.gap3)
-            .clip(RoundedCornerShape(K.rCard)).background(K.surface1).padding(vertical = K.gap2),
+            .panel(K.rCard).padding(vertical = K.gap2),
     ) {
-        Rail(Node.ORIGIN, thick = false, top = true) {
+        Rail(Mark.START, null, walk) {
             Endpoint(fromLabel, hm.format(Date(trip.dep * 1000)), T("Leave at", "יציאה בשעה"))
         }
+        var boarded = -1
         trip.legs.forEachIndexed { i, l ->
             when (l.kind) {
                 Moovit.LegKind.WALK -> {
@@ -255,46 +281,73 @@ private fun Timeline(
                         while (j < trip.legs.size && trip.legs[j].kind == Moovit.LegKind.WALK) {
                             mins += trip.legs[j].minutes; metres += trip.legs[j].meters; j++
                         }
-                        if (mins >= 1 || metres > 30) Rail(Node.WALK, thick = false) {
-                            Step(walkLabel(metres, mins), null)
+                        if (mins >= 1 || metres > 30) Rail(Mark.NONE, walk, walk) {
+                            Step(walkLabel(metres, mins), null) { WalkGlyph(K.dim, 15.dp) }
                         }
                     }
                 }
-                Moovit.LegKind.TAXI -> Rail(Node.RIDE, thick = true) {
-                    Step(T("Gett · ${l.minutes} min", "Gett · ${l.minutes} דק׳"), null)
+                Moovit.LegKind.TAXI -> Rail(Mark.NONE, Seg(K.muted), Seg(K.muted)) {
+                    Step(T("Gett · ${l.minutes} min", "Gett · ${l.minutes} דק׳"), null) { ModeGlyph(Mode.TAXI, K.muted, 15.dp) }
                     Spacer(Modifier.height(K.gap2))
                     GettButton(l)
                 }
-                Moovit.LegKind.BIKE -> Rail(Node.RIDE, thick = true) {
+                Moovit.LegKind.BIKE -> Rail(Mark.NONE, Seg(K.muted), Seg(K.muted)) {
                     Step(T("Cycle ${l.minutes} min", "אופניים ${l.minutes} דק׳"), null)
                 }
                 Moovit.LegKind.RIDE -> {
                     val wait = trip.legs.getOrNull(i - 1)?.takeIf { w -> w.kind == Moovit.LegKind.WAIT }
-                    val board = r.stop(l.fromStop)
+                    val tint = tintOf(l)
+                    val ride = Seg(tint)
+                    val mode = legMode(l, r)
+                    if (boarded != i) {
+                        val board = r.stop(l.fromStop)
+                        Rail(Mark.STOP, walk, ride, tint) {
+                            StopRowDetail(
+                                board?.name ?: T("Board here", "עלייה כאן"), board?.code,
+                                hm.format(Date(l.dep * 1000)), mode,
+                                platform = r.platform(l, wait),
+                                stopId = l.fromStop,
+                            )
+                            Spacer(Modifier.height(K.gap2))
+                            BoardCard(l, wait, r, onTrack)
+                        }
+                    }
+                    Rail(Mark.NONE, ride, ride) {
+                        Step(rideLabel(l), if (l.fare >= 0) "%s%.2f".format(l.currency, l.fare / 100.0) else null) {
+                            ModeGlyph(mode, tint, 15.dp)
+                        }
+                    }
                     val alight = r.stop(l.toStop)
-                    Rail(Node.BOARD, thick = false) {
-                        StopRowDetail(
-                            board?.name ?: T("Board here", "עלייה כאן"), board?.code,
-                            hm.format(Date(l.dep * 1000)), legMode(l, r),
-                            platform = r.platform(l, wait),
-                        )
-                        Spacer(Modifier.height(K.gap2))
-                        BoardCard(l, wait, r, onTrack)
-                    }
-                    Rail(Node.RIDE, thick = true) {
-                        Step(rideLabel(l), if (l.fare >= 0) "%s%.2f".format(l.currency, l.fare / 100.0) else null)
-                    }
-                    Rail(Node.ALIGHT, thick = false) {
-                        StopRowDetail(
-                            alight?.name ?: T("Get off here", "ירידה כאן"), alight?.code,
-                            hm.format(Date(l.arr * 1000)), legMode(l, r),
-                        )
+                    val n = nextFromSameStop(i)
+                    if (n >= 0) {
+                        val next = trip.legs[n]
+                        val nextWait = trip.legs.getOrNull(n - 1)?.takeIf { w -> w.kind == Moovit.LegKind.WAIT }
+                        Rail(Mark.STOP, ride, Seg(tintOf(next)), tintOf(next)) {
+                            StopRowDetail(
+                                alight?.name ?: T("Change here", "החלפה כאן"), alight?.code,
+                                hm.format(Date(next.dep * 1000)), legMode(next, r),
+                                platform = r.platform(next, nextWait),
+                                stopId = l.toStop,
+                                note = T("Change here · you arrive ${hm.format(Date(l.arr * 1000))}", "החלפה כאן · מגיעים ב-${hm.format(Date(l.arr * 1000))}"),
+                            )
+                            Spacer(Modifier.height(K.gap2))
+                            BoardCard(next, nextWait, r, onTrack)
+                        }
+                        boarded = n
+                    } else {
+                        Rail(Mark.STOP, ride, walk, tint) {
+                            StopRowDetail(
+                                alight?.name ?: T("Get off here", "ירידה כאן"), alight?.code,
+                                hm.format(Date(l.arr * 1000)), mode,
+                                stopId = if (l === lastRide) l.toStop else -1,
+                            )
+                        }
                     }
                 }
                 else -> {}
             }
         }
-        Rail(Node.DEST, thick = false, bottom = true) {
+        Rail(Mark.END, walk, null) {
             Endpoint(toLabel, hm.format(Date(trip.arr * 1000)), T("Arrive", "הגעה"))
         }
     }
@@ -316,30 +369,42 @@ private fun rideLabel(l: Moovit.Leg): String {
         else T("Ride ${l.minutes} min", "נסיעה ${l.minutes} דק׳")
 }
 
+private class Seg(val tint: Color, val walk: Boolean = false)
+
+private enum class Mark { START, END, STOP, NONE }
+
 @Composable
 private fun Rail(
-    node: Node,
-    thick: Boolean,
-    top: Boolean = false,
-    bottom: Boolean = false,
+    mark: Mark,
+    above: Seg?,
+    below: Seg?,
+    tint: Color = K.text,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         Canvas(Modifier.width(44.dp).fillMaxHeight()) {
-            val x = size.width * .55f
-            val w = if (thick) size.width * .16f else size.width * .045f
-            val nodeY = 22.dp.toPx().coerceAtMost(size.height * .5f)
-            val tint = if (thick) K.muted else K.surface4
-            if (!top) drawLine(tint, Offset(x, 0f), Offset(x, nodeY), w, StrokeCap.Butt)
-            if (!bottom) drawLine(tint, Offset(x, nodeY), Offset(x, size.height), w, StrokeCap.Butt)
-            when (node) {
-                Node.ORIGIN, Node.DEST ->
-                    drawCircle(K.text, 7.dp.toPx(), Offset(x, nodeY), style = Stroke(2.5.dp.toPx()))
-                Node.BOARD, Node.ALIGHT -> {
-                    drawCircle(K.surface1, 6.dp.toPx(), Offset(x, nodeY))
-                    drawCircle(K.text, 4.5.dp.toPx(), Offset(x, nodeY))
+            val x = size.width * .5f
+            val nodeY = 21.dp.toPx().coerceAtMost(size.height * .5f)
+            val ring = 7.dp.toPx()
+            fun stretch(s: Seg?, from: Float, to: Float) {
+                if (s == null || to <= from) return
+                if (!s.walk) {
+                    drawLine(s.tint, Offset(x, from), Offset(x, to), 5.dp.toPx(), StrokeCap.Butt)
+                    return
                 }
-                else -> {}
+                val step = 6.dp.toPx()
+                var y = from + step / 2
+                while (y < to) { drawCircle(s.tint, 1.7.dp.toPx(), Offset(x, y)); y += step }
+            }
+            val gap = if (mark == Mark.NONE) 0f else ring
+            stretch(above, 0f, nodeY - gap)
+            stretch(below, nodeY + gap, size.height)
+            val at = Offset(x, nodeY)
+            when (mark) {
+                Mark.START -> drawCircle(K.text, ring - 1.5.dp.toPx(), at, style = Stroke(2.5.dp.toPx()))
+                Mark.END -> drawCircle(K.text, ring - 1.dp.toPx(), at)
+                Mark.STOP -> drawCircle(tint, ring - 1.5.dp.toPx(), at, style = Stroke(3.dp.toPx()))
+                Mark.NONE -> {}
             }
         }
         Column(
@@ -374,15 +439,18 @@ private fun StopRowDetail(
     time: String,
     mode: Mode? = null,
     platform: String = "",
+    stopId: Int = -1,
+    note: String? = null,
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        if (mode != null) {
-            StationMark(mode, 17.dp)
+        if (mode != null || stopId > 0) {
+            StopGlyphOrPhoto(stopId, mode)
             Spacer(Modifier.width(K.gap2))
         }
         Column(Modifier.weight(1f)) {
             Text(name, fontSize = 15.sp, color = K.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (!code.isNullOrBlank()) Text(T("Stop $code", "תחנה $code"), fontSize = 14.sp, color = K.dim)
+            if (note != null) Text(note, fontSize = 13.sp, color = K.muted)
             if (platform.isNotBlank()) {
                 Spacer(Modifier.height(K.gap1))
                 PlatformTag(platform)
@@ -394,12 +462,13 @@ private fun StopRowDetail(
 }
 
 @Composable
-private fun Step(label: String, trailing: String?) {
+private fun Step(label: String, trailing: String?, glyph: (@Composable () -> Unit)? = null) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (glyph != null) { glyph(); Spacer(Modifier.width(K.gap2)) }
         Text(label, fontSize = 14.sp, color = K.muted, modifier = Modifier.weight(1f))
         if (trailing != null) Text(
             trailing, fontSize = 14.sp, color = K.muted,
-            modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(K.plate)
+            modifier = Modifier.panel(999.dp)
                 .padding(horizontal = 9.dp, vertical = 4.dp),
         )
     }

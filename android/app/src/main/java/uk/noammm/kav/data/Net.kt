@@ -32,12 +32,12 @@ class Net private constructor() {
 
     lateinit var tripRoute: IntArray; private set
     lateinit var tripStart: IntArray; private set
+    // Bit 0 is Sunday. Bundles older than KAV5 hold one day, so their trips run every day.
+    lateinit var tripDays: IntArray; private set
     lateinit var stStop: IntArray; private set
-    lateinit var stArr: IntArray; private set
     lateinit var stDep: IntArray; private set
 
     lateinit var cST: IntArray; private set
-    lateinit var cTrip: IntArray; private set
 
     lateinit var dStart: IntArray; private set
     lateinit var dConn: IntArray; private set
@@ -50,6 +50,31 @@ class Net private constructor() {
     fun cityOf(s: Int): String = city.getOrElse(cityOf[s]) { "" }
     fun agencyOf(r: Int): String = agency.getOrElse(rAgency.getOrElse(r) { -1 }) { "" }
     fun tripLast(t: Int): Int = stStop[tripStart[t + 1] - 1]
+    fun runsOn(t: Int, day: Int): Boolean = tripDays[t] and (1 shl day) != 0
+
+    fun tripOf(stopTime: Int): Int {
+        var lo = 0; var hi = tripRoute.size - 1
+        while (lo < hi) {
+            val mid = (lo + hi + 1) ushr 1
+            if (tripStart[mid] <= stopTime) lo = mid else hi = mid - 1
+        }
+        return lo
+    }
+
+    val stopWords: Array<String> by lazy {
+        Array(nStops) { spacedWords(if (code[it] > 0) name[it] + " " + code[it] else name[it]) }
+    }
+    val stopType: IntArray by lazy {
+        val out = IntArray(nStops) { -1 }
+        for (t in tripRoute.indices) {
+            val type = rType[tripRoute[t]]
+            for (k in tripStart[t] until tripStart[t + 1]) {
+                val s = stStop[k]
+                if (out[s] < 0 || type < out[s]) out[s] = type
+            }
+        }
+        out
+    }
 
     private lateinit var b: ByteArray
     private var p = 0
@@ -74,11 +99,13 @@ class Net private constructor() {
     private fun parse(buf: ByteArray) {
         b = buf; p = 0
         val magic = String(b, 0, 4, StandardCharsets.US_ASCII)
-        if (magic != "KAV3" && magic != "KAV4") throw IllegalArgumentException("bad bundle: $magic")
-        val v4 = magic == "KAV4"
+        if (magic != "KAV3" && magic != "KAV4" && magic != "KAV5") throw IllegalArgumentException("bad bundle: $magic")
+        val v4 = magic != "KAV3"
+        val v5 = magic == "KAV5"
         p = 4
 
         val nS = vi(); val nR = vi(); val nT = vi(); val nC = vi()
+        val nST = if (v5) vi() else -1
         agency = if (v4) Array(vi()) { vs() } else emptyArray()
 
         city = Array(nC) { vs() }
@@ -101,20 +128,38 @@ class Net private constructor() {
         }
 
         tripRoute = IntArray(nT); tripStart = IntArray(nT + 1)
-        val ss = IntVec(1 shl 21); val sa = IntVec(1 shl 21); val sd = IntVec(1 shl 21)
-        for (t in 0 until nT) {
-            tripRoute[t] = vi()
-            val n = vi()
-            var pt = vi(); var ps = 0
-            tripStart[t] = ss.n
-            for (k in 0 until n) {
-                val a = pt + vi(); val d = a + vi(); val s = ps + vi()
-                sa.push(a); sd.push(d); ss.push(s)
-                pt = d; ps = s
+        tripDays = IntArray(nT) { 0x7f }
+        if (v5) {
+            stStop = IntArray(nST); stDep = IntArray(nST)
+            var k = 0
+            for (t in 0 until nT) {
+                tripRoute[t] = vi(); tripDays[t] = vi()
+                val n = vi()
+                var pt = vi(); var ps = 0
+                tripStart[t] = k
+                for (j in 0 until n) {
+                    val d = pt + vi() + vi(); val s = ps + vi()
+                    stDep[k] = d; stStop[k] = s; k++
+                    pt = d; ps = s
+                }
             }
+            tripStart[nT] = k
+        } else {
+            val ss = IntVec(1 shl 21); val sd = IntVec(1 shl 21)
+            for (t in 0 until nT) {
+                tripRoute[t] = vi()
+                val n = vi()
+                var pt = vi(); var ps = 0
+                tripStart[t] = ss.n
+                for (k in 0 until n) {
+                    val d = pt + vi() + vi(); val s = ps + vi()
+                    sd.push(d); ss.push(s)
+                    pt = d; ps = s
+                }
+            }
+            tripStart[nT] = ss.n
+            stStop = ss.trimmed(); stDep = sd.trimmed()
         }
-        tripStart[nT] = ss.n
-        stStop = ss.trimmed(); stArr = sa.trimmed(); stDep = sd.trimmed()
 
         hay = Array(nS) { (name[it] + " " + cityOf(it)).lowercase() }
         b = ByteArray(0)
@@ -137,12 +182,11 @@ class Net private constructor() {
         }
         for (i in 0..span) cnt[i + 1] += cnt[i]
 
-        cST = IntArray(m); cTrip = IntArray(m)
+        cST = IntArray(m)
         for (t in 0 until nT) {
             var i = tripStart[t]; val z = tripStart[t + 1] - 1
             while (i < z) {
-                val q = cnt[stDep[i]]++
-                cST[q] = i; cTrip[q] = t
+                cST[cnt[stDep[i]]++] = i
                 i++
             }
         }

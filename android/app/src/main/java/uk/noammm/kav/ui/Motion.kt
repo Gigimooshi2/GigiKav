@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlin.math.abs
@@ -28,6 +29,26 @@ fun forward(): ContentTransform =
 fun backward(): ContentTransform =
     fadeIn(tween(MED)) togetherWith
         (slideOutHorizontally(tween(MED)) { it / 6 } + fadeOut(tween(FAST)))
+
+private val lift = spring<IntOffset>(dampingRatio = .9f, stiffness = 380f)
+
+// No size animation: the default one grows search out of the middle of the screen.
+fun searchIn(rise: Int) = ContentTransform(
+    slideInVertically(lift) { rise } + fadeIn(tween(220, delayMillis = 30, easing = LinearOutSlowInEasing)),
+    fadeOut(tween(FAST)), sizeTransform = null,
+)
+
+fun searchOut(rise: Int) = ContentTransform(
+    fadeIn(tween(FAST)),
+    slideOutVertically(tween(FAST, easing = FastOutLinearInEasing)) { rise } + fadeOut(tween(160)), sizeTransform = null,
+)
+
+@Composable
+fun underSearch(open: Boolean): State<Float> = animateFloatAsState(
+    if (open) 0f else 1f,
+    if (open) tween(120, easing = LinearOutSlowInEasing) else tween(200, delayMillis = 80, easing = LinearOutSlowInEasing),
+    label = "underSearch",
+)
 
 @Composable
 fun LanguageSwitch(content: @Composable () -> Unit) {

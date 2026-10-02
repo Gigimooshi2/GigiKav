@@ -43,8 +43,8 @@ object MapFile {
         }
     }
 
-    fun styleJson(ctx: Context): String =
-        ctx.assets.open("map/style.json").reader().use { it.readText() }
+    fun styleJson(ctx: Context, light: Boolean = false): String =
+        ctx.assets.open(if (light) "map/style-light.json" else "map/style.json").reader().use { it.readText() }
             .replace("__MAP__", "pmtiles://file://" + file(ctx).absolutePath)
 
     fun startDownload(ctx: Context) {

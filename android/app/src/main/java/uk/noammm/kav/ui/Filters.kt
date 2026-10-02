@@ -23,16 +23,15 @@ import androidx.compose.ui.unit.sp
 import uk.noammm.kav.data.Moovit
 
 enum class ResultFilter {
-    BUS, TRAIN, LIGHT_RAIL, CARMELIT, RAKAVLIT, SHARE_TAXI, TAXI, BIKE, WALK;
+    BUS, TRAIN, LIGHT_RAIL, CARMELIT_RAKAVLIT, SHUTTLE, TAXI, BIKE, WALK;
 
     val label: String
         get() = when (this) {
             BUS -> T("Bus", "אוטובוס")
             TRAIN -> T("Train", "רכבת")
             LIGHT_RAIL -> T("Light rail", "רכבת קלה")
-            CARMELIT -> T("Carmelit", "כרמלית")
-            RAKAVLIT -> T("Rakavlit", "רכבלית")
-            SHARE_TAXI -> T("Share taxi", "מונית שירות")
+            CARMELIT_RAKAVLIT -> T("Carmelit & Rakavlit", "כרמלית ורכבלית")
+            SHUTTLE -> T("Shuttle", "שאטל")
             TAXI -> T("Taxi", "מונית")
             BIKE -> T("Bike", "אופניים")
             WALK -> T("Walking only", "הליכה בלבד")
@@ -43,9 +42,8 @@ enum class ResultFilter {
             BUS -> T("Every bus operator", "כל מפעילי האוטובוסים")
             TRAIN -> T("Israel Railways", "רכבת ישראל")
             LIGHT_RAIL -> T("The Jerusalem and Tel Aviv light rail", "הרכבת הקלה בירושלים ובתל אביב")
-            CARMELIT -> T("Haifa's underground funicular", "הרכבת התחתית של חיפה")
-            RAKAVLIT -> T("Cable Express, the Haifa cable car", "כבל אקספרס, הרכבלית של חיפה")
-            SHARE_TAXI -> T("Monit sherut lines", "קווי מוניות שירות")
+            CARMELIT_RAKAVLIT -> T("Haifa's funicular and the Cable Express cable car", "הכרמלית וכבל אקספרס, הרכבלית של חיפה")
+            SHUTTLE -> T("Municipal shuttle lines", "קווי שאטל עירוניים")
             TAXI -> T("Gett rides, on their own or before a train", "נסיעות Gett, בפני עצמן או לפני רכבת")
             BIKE -> T("Cycling routes", "מסלולי אופניים")
             WALK -> T("Routes done entirely on foot", "מסלולים המתבצעים כולם ברגל")
@@ -58,8 +56,7 @@ fun routeTypesFor(on: Set<ResultFilter>): List<Int> {
     if (ResultFilter.BUS !in on) off.add(3)
     if (ResultFilter.TRAIN !in on) off.add(2)
     if (ResultFilter.LIGHT_RAIL !in on) off.addAll(listOf(0, 1))
-    if (ResultFilter.CARMELIT !in on) off.add(7)
-    if (ResultFilter.RAKAVLIT !in on) off.addAll(listOf(5, 6))
+    if (ResultFilter.CARMELIT_RAKAVLIT !in on) off.addAll(listOf(5, 6, 7))
     return all.filterNot { it in off }
 }
 
@@ -75,13 +72,14 @@ fun filterResults(list: List<Moovit.Itinerary>, on: Set<ResultFilter>, r: Moovit
         if (ResultFilter.WALK !in on && !hasRide && !hasTaxi && !hasBike) return@filter false
         legs.filter { l -> l.kind == Moovit.LegKind.RIDE }.all { ride ->
             val info = r.line(ride.lineId) ?: return@all true
-            when (modeOf(r.routeType(info.agencyId))) {
+            val rt = r.routeType(info.agencyId)
+            if (rt == 711) return@all ResultFilter.SHUTTLE in on
+            when (modeOf(rt)) {
                 Mode.BUS -> ResultFilter.BUS in on
                 Mode.TRAIN -> ResultFilter.TRAIN in on
-                Mode.TAXI -> ResultFilter.SHARE_TAXI in on
+                Mode.TAXI -> ResultFilter.BUS in on
                 Mode.TRAM, Mode.SUBWAY -> ResultFilter.LIGHT_RAIL in on
-                Mode.FUNICULAR -> ResultFilter.CARMELIT in on
-                Mode.CABLE, Mode.GONDOLA -> ResultFilter.RAKAVLIT in on
+                Mode.FUNICULAR, Mode.CABLE, Mode.GONDOLA -> ResultFilter.CARMELIT_RAKAVLIT in on
                 else -> true
             }
         }
@@ -97,8 +95,8 @@ fun SwitchRow(
     leading: @Composable () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.plate)
-            .border(1.dp, if (on) K.borderStrong else K.border, RoundedCornerShape(14.dp))
+        Modifier.fillMaxWidth().panel(14.dp)
+            .then(if (on) Modifier.border(1.dp, K.borderStrong, RoundedCornerShape(14.dp)) else Modifier)
             .semantics { contentDescription = label; toggleableState = if (on) ToggleableState.On else ToggleableState.Off }
             .clickable(role = Role.Switch) { onToggle(!on) }
             .padding(horizontal = K.gap3, vertical = 10.dp),
@@ -124,9 +122,8 @@ fun FilterRows(enabled: Set<ResultFilter>, onToggle: (ResultFilter, Boolean) -> 
                     ResultFilter.BUS -> ModeGlyph(Mode.BUS, if (on) K.text else K.dim, 18.dp)
                     ResultFilter.TRAIN -> ModeGlyph(Mode.TRAIN, if (on) K.text else K.dim, 18.dp)
                     ResultFilter.LIGHT_RAIL -> ModeGlyph(Mode.TRAM, if (on) K.text else K.dim, 18.dp)
-                    ResultFilter.CARMELIT -> CarmelitMark(18.dp)
-                    ResultFilter.RAKAVLIT -> RakavlitMark(18.dp)
-                    ResultFilter.SHARE_TAXI -> ModeGlyph(Mode.TAXI, if (on) K.text else K.dim, 18.dp)
+                    ResultFilter.CARMELIT_RAKAVLIT -> CarmelitMark(18.dp)
+                    ResultFilter.SHUTTLE -> ShuttleMark(18.dp)
                     ResultFilter.TAXI -> ModeGlyph(Mode.TAXI, if (on) K.text else K.dim, 18.dp)
                     ResultFilter.BIKE -> BikeGlyph(if (on) K.text else K.dim)
                     ResultFilter.WALK -> WalkGlyph(if (on) K.text else K.dim, 16.dp)

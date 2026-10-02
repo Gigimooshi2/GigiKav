@@ -4,20 +4,16 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -60,16 +56,6 @@ fun LoadingPulse(label: String, modifier: Modifier = Modifier, wide: Boolean = t
         }
         Spacer(Modifier.height(K.gap3))
         Text(label, fontSize = 15.sp, color = K.dim)
-    }
-}
-
-@Composable
-fun ProgressBar(fraction: Float, modifier: Modifier = Modifier) {
-    val shown by animateFloatAsState(
-        fraction.coerceIn(0f, 1f), tween(400, easing = FastOutSlowInEasing), label = "progress",
-    )
-    Box(modifier.height(6.dp).clip(RoundedCornerShape(999.dp)).background(K.surface4)) {
-        Box(Modifier.fillMaxWidth(shown.coerceAtLeast(.02f)).fillMaxHeight().background(K.accent))
     }
 }
 

@@ -1,9 +1,9 @@
 """Compile the Israeli MOT GTFS feed into the Kav bundle the app ships.
 
 Emits a compact varint binary that the app decodes into typed arrays: stops,
-lines, trips and a per-stop departure index. Defaults to
-the Tel Aviv metro bbox and one service day; KAV_BBOX=national covers the
-country, which is what android/app/src/main/assets/il.kav is.
+lines, and the trips of one ordinary week, each tagged with the days it runs.
+Defaults to the Tel Aviv metro bbox; KAV_BBOX=national covers the country,
+which is what android/app/src/main/assets/il.kav is.
 
 Read-only over already-downloaded files; makes no network calls.
 """
@@ -16,7 +16,12 @@ OUT  = os.environ.get("KAV_OUT",  os.path.join(HERE, "android", "app", "src", "m
 os.makedirs(OUT, exist_ok=True)
 _zip = zipfile.ZipFile(ZIP)
 
-TODAY   = datetime.date(2026, 9, 7)
+# KAV_WEEK picks the Sunday, by default the coming one. Check the per-day counts
+# printed below before shipping a holiday week.
+_SUN    = datetime.date.today() + datetime.timedelta((6 - datetime.date.today().weekday()) % 7)
+WEEK    = datetime.date.fromisoformat(os.environ.get("KAV_WEEK", _SUN.isoformat()))
+assert WEEK.weekday() == 6, "KAV_WEEK must be a Sunday"
+DAYS    = [WEEK + datetime.timedelta(d) for d in range(7)]
 DAYCOLS = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"]
 # lat_min, lat_max, lon_min, lon_max. Override with KAV_BBOX="lat0,lat1,lon0,lon1";
 # KAV_BBOX=national covers the whole country.
@@ -39,14 +44,19 @@ def vstr(buf, s):
     e = s.encode("utf-8"); vint(buf, len(e)); buf += e
 
 # services running on the target day
-active = set()
+# services running in that week, as a mask of its days (bit 0 = Sunday)
+active = {}
 for r in csv.DictReader(openf("calendar.txt")):
     s, e = r["start_date"], r["end_date"]
     sd = datetime.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
     ed = datetime.date(int(e[:4]), int(e[4:6]), int(e[6:8]))
-    if sd <= TODAY <= ed and r[DAYCOLS[(TODAY.weekday()+1) % 7]] == "1":
-        active.add(r["service_id"])
-print(f"services active on {TODAY}: {len(active):,}")
+    mask = 0
+    for i, day in enumerate(DAYS):
+        if sd <= day <= ed and r[DAYCOLS[i]] == "1":
+            mask |= 1 << i
+    if mask:
+        active[r["service_id"]] = mask
+print(f"services running in the week of {WEEK}: {len(active):,}")
 
 # The Israeli feed keeps the city in stop_desc, not in stop_name, so a query
 # like "הדרור 30 ראש העין" can never match on the name alone. Pull it out and
@@ -99,11 +109,12 @@ for r in csv.DictReader(openf("routes.txt")):
     routes.append((r["route_short_name"].strip(), r["route_long_name"].strip(), rtype,
                    agency_idx.get(r["agency_id"], -1)))
 
-trip_route = {}
+trip_route, trip_days = {}, {}
 for r in csv.DictReader(openf("trips.txt")):
     if r["service_id"] in active:
         trip_route[r["trip_id"]] = route_idx.get(r["route_id"], 0)
-print(f"trips today (national): {len(trip_route):,}")
+        trip_days[r["trip_id"]] = active[r["service_id"]]
+print(f"trips in the week (national): {len(trip_route):,}")
 
 # stream stop_times, keep trips that touch the bbox
 def hms(x):
@@ -114,7 +125,7 @@ def flush(tid, sq):
     if not sq or tid not in trip_route: return
     inside = [p for p in sq if p[2] is not None]
     if len(inside) < 2: return                # must be usable inside the region
-    kept.append((trip_route[tid], inside))
+    kept.append((trip_route[tid], trip_days[tid], inside))
 
 with openf("stop_times.txt") as f:
     f.readline()
@@ -129,12 +140,17 @@ with openf("stop_times.txt") as f:
         rows += 1
         if rows % 5_000_000 == 0: print(f"  {rows:,} rows", flush=True)
 flush(cur, seq)
-n_conn = sum(len(t[1]) - 1 for t in kept)
-print(f"trips kept: {len(kept):,}   connections: {n_conn:,}")
+n_conn = sum(len(t[2]) - 1 for t in kept)
+n_st = sum(len(t[2]) for t in kept)
+print(f"trips kept: {len(kept):,}   stop times: {n_st:,}   connections: {n_conn:,}")
+for i, day in enumerate(DAYS):
+    print(f"  {day:%a %d %b}: {sum(1 for t in kept if t[1] >> i & 1):,} trips")
 
 # encode
-buf = bytearray(b"KAV4")
+# KAV5 adds the stop-time count up front and a day mask per trip.
+buf = bytearray(b"KAV5")
 vint(buf, len(stops)); vint(buf, len(routes)); vint(buf, len(kept)); vint(buf, len(cities))
+vint(buf, n_st)
 vint(buf, len(agencies))
 for a in agencies:
     vstr(buf, a)
@@ -151,8 +167,8 @@ for name, la, lo, code, ci in stops:
 for short, long, rtype, agency in routes:
     vstr(buf, short); vstr(buf, long); vint(buf, rtype); vint(buf, agency)
 
-for ridx, sq in kept:
-    vint(buf, ridx); vint(buf, len(sq)); vint(buf, sq[0][0])
+for ridx, days, sq in kept:
+    vint(buf, ridx); vint(buf, days); vint(buf, len(sq)); vint(buf, sq[0][0])
     pt, ps = sq[0][0], 0
     for arr, dep, s in sq:
         vint(buf, arr - pt); vint(buf, dep - arr); vint(buf, s - ps)

@@ -12,6 +12,8 @@ private const val FRESH_S = 150L
 
 internal fun Fix.isFresh(now: Long) = now - at <= FRESH_S
 internal fun Fix.distanceTo(p: Pair<Double, Double>) = metres(lat, lon, p.first, p.second)
+internal fun Fix.aboard(shape: List<Pair<Double, Double>>) =
+    shape.size >= 2 && distanceToPath(lat, lon, shape) < 80 && alongPath(lat, lon, shape) >= 60
 
 private class Flat(lat0: Double, lon0: Double) {
     private val kx = cos(Math.toRadians(lat0)) * 111_320.0
@@ -135,39 +137,37 @@ private fun onStep(step: Step, r: Moovit.Resolved, chosen: Map<Int, Int>, fix: F
     is Step.Ride -> {
         val ride = rideOf(step, chosen)
         val shape = ride.shape
-        val vehicle = r.arrival(ride)?.takeIf { it.hasLocation }
         shape.size >= 2 && distanceToPath(fix.lat, fix.lon, shape) < 50 &&
-            alongPath(fix.lat, fix.lon, shape) > 150 &&
-            (fix.speed > 5f || (vehicle != null && metres(fix.lat, fix.lon, vehicle.lat, vehicle.lon) < 80))
+            alongPath(fix.lat, fix.lon, shape) > 150 && fix.speed > 5f
     }
     is Step.Arrive -> stepTarget(step, r, chosen)?.let { fix.distanceTo(it) < 40 } == true
     else -> false
 }
 
-private fun done(step: Step, r: Moovit.Resolved, chosen: Map<Int, Int>, now: Long, fix: Fix?): Boolean {
+private fun done(step: Step, r: Moovit.Resolved, chosen: Map<Int, Int>, now: Long, live: Fix?, last: Fix?): Boolean {
     val target = stepTarget(step, r, chosen)
     return when (step) {
-        is Step.Start -> now >= step.time || (fix != null && target != null && fix.distanceTo(target) > 60)
-        is Step.Walk -> if (fix != null && target != null) fix.distanceTo(target) < 40 else now >= step.leg.arr
+        is Step.Start -> now >= step.time || (live != null && target != null && live.distanceTo(target) > 60)
+        is Step.Walk -> if (live != null && target != null) live.distanceTo(target) < 40 else now >= step.leg.arr
         is Step.Wait -> {
             val ride = rideOf(step, chosen)
-            if (fix != null && target != null) {
-                val vehicle = r.arrival(ride)
-                val left = vehicle != null && vehicle.hasLocation && vehicle.stopIndex >= 0 && vehicle.nextStopIndex > vehicle.stopIndex
-                (fix.distanceTo(target) > 80 && distanceToPath(fix.lat, fix.lon, ride.shape) < 60) ||
-                    (left && fix.distanceTo(target) > 40)
+            if (live != null && target != null) {
+                val away = live.distanceTo(target)
+                val onRoute = distanceToPath(live.lat, live.lon, ride.shape) < 60
+                onRoute && away > 40 && live.speed > 5f
             } else {
                 val dep = departureOf(step, r, chosen)
-                dep.status != 3 && now >= dep.timeUtc
+                dep.status != 3 && now >= dep.timeUtc &&
+                    (target == null || last?.let { it.distanceTo(target) < 150 } == true)
             }
         }
         is Step.Ride -> {
             val ride = rideOf(step, chosen)
-            (fix != null && ride.shape.isNotEmpty() && fix.distanceTo(ride.shape.last()) < 60) ||
-                if (fix != null && target != null) fix.distanceTo(target) < 45 else now >= ride.arr + 60
+            (live != null && ride.shape.isNotEmpty() && live.distanceTo(ride.shape.last()) < 60) ||
+                if (live != null && target != null) live.distanceTo(target) < 45 else now >= ride.arr + 60
         }
-        is Step.Taxi -> if (fix != null && target != null) fix.distanceTo(target) < 45 else now >= step.leg.arr
-        is Step.Cycle -> if (fix != null && target != null) fix.distanceTo(target) < 45 else now >= step.leg.arr
+        is Step.Taxi -> if (live != null && target != null) live.distanceTo(target) < 45 else now >= step.leg.arr
+        is Step.Cycle -> if (live != null && target != null) live.distanceTo(target) < 45 else now >= step.leg.arr
         is Step.Arrive -> false
     }
 }
@@ -178,7 +178,7 @@ private fun rideLeftBehind(step: Step.Ride, chosen: Map<Int, Int>, fix: Fix): Bo
     return alongPath(fix.lat, fix.lon, shape) > pathLength(shape) - 60
 }
 
-private fun pathLength(path: List<Pair<Double, Double>>): Double {
+internal fun pathLength(path: List<Pair<Double, Double>>): Double {
     var m = 0.0
     for (i in 0 until path.lastIndex) m += metres(path[i].first, path[i].second, path[i + 1].first, path[i + 1].second)
     return m
@@ -199,7 +199,7 @@ internal fun journeyProgress(
         for (k in steps.lastIndex downTo i + 1) {
             if (!onStep(steps[k], r, chosen, live)) continue
             if ((i until k).any { j ->
-                    steps[j] is Step.Ride && !done(steps[j], r, chosen, now, live) &&
+                    steps[j] is Step.Ride && !done(steps[j], r, chosen, now, live, fix) &&
                         !(j == i && rideLeftBehind(steps[j] as Step.Ride, chosen, live))
                 }
             ) continue
@@ -207,7 +207,7 @@ internal fun journeyProgress(
             break
         }
     }
-    while (i < steps.lastIndex && done(steps[i], r, chosen, now, live)) i++
+    while (i < steps.lastIndex && done(steps[i], r, chosen, now, live, fix)) i++
     return i
 }
 
@@ -239,13 +239,10 @@ internal fun stopsProgress(
             it.hasLocation && it.stopIndex >= 0 && it.nextStopIndex > it.stopIndex &&
                 distanceToPath(it.lat, it.lon, shape) < 80
         }
-        val live = fix?.takeIf {
-            it.isFresh(now) && distanceToPath(it.lat, it.lon, shape) < 80 &&
-                alongPath(it.lat, it.lon, shape) >= 60
-        }
+        val live = fix?.takeIf { it.isFresh(now) && it.aboard(shape) }
         val at = when {
-            vehicle != null -> vehicle.lat to vehicle.lon
             live != null -> live.lat to live.lon
+            vehicle != null -> vehicle.lat to vehicle.lon
             else -> null
         }
         if (at != null) {

@@ -48,6 +48,26 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 Spacer(Modifier.height(K.gap5))
                 OnboardingButton(T("Next", "הבא")) { page = 1 }
             } else if (p == 1) {
+                Text(T("Pick a look", "בחרו מראה"), style = Display, fontSize = 26.sp)
+                Text(
+                    T(
+                        "OLED black, light or dark, with liquid glass or solid on top. " +
+                            "The preview changes as you tap, and Settings has this again later.",
+                        "שחור OLED, בהיר או כהה, עם זכוכית נוזלית או משטחים אטומים. " +
+                            "התצוגה המקדימה משתנה כשאתם מקישים, ואפשר לשנות זאת שוב בהגדרות.",
+                    ),
+                    fontSize = 14.sp, color = K.dim, lineHeight = 20.sp, modifier = Modifier.padding(top = K.gap2),
+                )
+                Spacer(Modifier.height(K.gap5))
+                AccentPreview()
+                Spacer(Modifier.height(K.gap2))
+                LookChoices {
+                    Text(it, style = DisplayItalic, fontSize = 12.sp, color = K.dim,
+                        modifier = Modifier.padding(start = K.gap3, top = K.gap4, bottom = K.gap2))
+                }
+                Spacer(Modifier.height(K.gap8))
+                OnboardingButton(T("Next", "הבא")) { Prefs.lookPicked(ctx); page = 2 }
+            } else if (p == 2) {
                 Text(T("Pick a colour", "בחרו צבע"), style = Display, fontSize = 26.sp)
                 Text(
                     T(
@@ -63,8 +83,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 Spacer(Modifier.height(K.gap6))
                 AccentPicker { Prefs.setAccent(ctx, it.toArgb()) }
                 Spacer(Modifier.height(K.gap8))
-                OnboardingButton(T("Next", "הבא")) { page = 2 }
-            } else if (p == 2) {
+                OnboardingButton(T("Next", "הבא")) { page = 3 }
+            } else if (p == 3) {
                 Text(T("What should a plan show?", "מה מסלול יכול לכלול?"), style = Display, fontSize = 26.sp)
                 Text(
                     T(
@@ -100,7 +120,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     ) { GlobeGlyph(if (Shown.co2) K.text else K.dim, K.surface1, 18.dp) }
                 }
                 Spacer(Modifier.height(K.gap8))
-                OnboardingButton(T("Next", "הבא")) { page = 3 }
+                OnboardingButton(T("Next", "הבא")) { page = 4 }
             } else {
                 val state = MapFile.state
                 Text(T("Download the map", "הורדת המפה"), style = Display, fontSize = 26.sp)
@@ -152,6 +172,6 @@ private fun OnboardingButton(label: String, lit: Boolean = true, onClick: () -> 
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontSize = 16.sp, color = if (lit) K.bg else K.text, fontWeight = FontWeight.Medium)
+        Text(label, fontSize = 16.sp, color = if (lit) K.onAccent else K.text, fontWeight = FontWeight.Medium)
     }
 }

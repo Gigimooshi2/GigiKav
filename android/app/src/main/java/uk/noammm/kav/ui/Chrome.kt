@@ -91,9 +91,9 @@ fun SettingsButton(badge: Boolean = false, onClick: () -> Unit) = PlateButton(T(
 }
 
 @Composable
-fun Chip(text: String, lit: Boolean, onClick: () -> Unit) {
+fun Chip(text: String, lit: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
-        Modifier
+        modifier
             .heightIn(min = 44.dp)
             .glassSurface(22.dp)
             .then(if (lit) Modifier.background(K.plateStrong) else Modifier)

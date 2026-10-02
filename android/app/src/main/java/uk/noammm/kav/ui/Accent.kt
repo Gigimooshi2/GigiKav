@@ -120,8 +120,7 @@ fun AccentPreview(modifier: Modifier = Modifier) {
             }
         }
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(K.surface1)
-                .border(0.5.dp, Color.White.copy(alpha = .14f), RoundedCornerShape(16.dp))
+            Modifier.fillMaxWidth().panel(16.dp)
                 .padding(horizontal = K.gap3, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(K.gap2),
         ) {
@@ -133,7 +132,7 @@ fun AccentPreview(modifier: Modifier = Modifier) {
             Text(T("Where to?", "לאן?"), fontSize = 12.sp, color = K.muted)
         }
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.surface1),
+            Modifier.fillMaxWidth().panel(14.dp),
         ) {
             Row(
                 Modifier.fillMaxWidth().background(K.accent.copy(alpha = .18f)).padding(horizontal = K.gap3, vertical = 5.dp),
@@ -145,8 +144,7 @@ fun AccentPreview(modifier: Modifier = Modifier) {
             Row(Modifier.padding(horizontal = K.gap3, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "472", fontSize = 11.sp, color = K.text,
-                    modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(K.plate)
-                        .border(1.dp, K.borderStrong, RoundedCornerShape(5.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+                    modifier = Modifier.panel(5.dp).padding(horizontal = 5.dp, vertical = 1.dp),
                 )
                 Spacer(Modifier.width(K.gap2))
                 Text(T("to Tel Aviv", "לתל אביב"), fontSize = 10.sp, color = K.muted, modifier = Modifier.weight(1f))
@@ -161,7 +159,7 @@ fun AccentPreview(modifier: Modifier = Modifier) {
                 Modifier.clip(RoundedCornerShape(999.dp)).background(K.accent).padding(horizontal = 10.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(T("Start", "התחלה"), fontSize = 10.sp, color = K.bg)
+                Text(T("Start", "התחלה"), fontSize = 10.sp, color = K.onAccent)
             }
         }
     }
