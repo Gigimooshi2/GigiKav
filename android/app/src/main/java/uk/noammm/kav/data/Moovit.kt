@@ -775,7 +775,23 @@ object Moovit {
                     taxiDropoff = locationPoint(journey?.let { jRec(it, "2") }),
                 )
             }
-            11, 12 -> Leg(LegKind.BIKE, dep = dep, arr = arr)
+            11, 12 -> {
+                android.util.Log.i("KavBike", "leg $fid: " + inner.toString().take(3000))
+                fun inIsrael(p: List<Pair<Double, Double>>) = p.size >= 2 &&
+                    p.all { it.first in 29.0..34.0 && it.second in 34.0..36.0 }
+                val shapeRec = jRec(inner, "3")?.takeIf { inIsrael(decodePolyline(jStr(it, "2"))) }
+                    ?: inner.keys().asSequence().mapNotNull { k -> jRec(inner, k) }
+                        .firstOrNull { inIsrael(decodePolyline(jStr(it, "2"))) }
+                val journey = jRec(inner, "2")
+                val ends = listOfNotNull(
+                    locationPoint(journey?.let { jRec(it, "1") }), locationPoint(journey?.let { jRec(it, "2") }),
+                )
+                Leg(
+                    LegKind.BIKE, dep = dep, arr = arr,
+                    meters = (shapeRec?.let { jDbl(it, "1") } ?: 0.0).toInt(),
+                    shape = decodePolyline(shapeRec?.let { jStr(it, "2") }).ifEmpty { ends },
+                )
+            }
             else -> Leg(LegKind.OTHER, dep = dep, arr = arr)
         }
     }

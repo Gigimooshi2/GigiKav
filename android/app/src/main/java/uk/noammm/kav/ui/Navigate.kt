@@ -73,7 +73,10 @@ internal sealed class Step {
         override val focus: List<Pair<Double, Double>>,
     ) : Step()
     class Taxi(val leg: Moovit.Leg, override val focus: List<Pair<Double, Double>>) : Step()
-    class Cycle(val leg: Moovit.Leg, override val focus: List<Pair<Double, Double>>) : Step()
+    class Cycle(
+        val leg: Moovit.Leg, override val focus: List<Pair<Double, Double>>,
+        val dest: Pair<Double, Double>? = null,
+    ) : Step()
     class Arrive(val label: String, val time: Long, override val focus: List<Pair<Double, Double>>) : Step()
 }
 
@@ -110,7 +113,12 @@ internal fun buildSteps(trip: Moovit.Itinerary, fromLabel: String, toLabel: Stri
             Moovit.LegKind.TAXI -> out.add(Step.Taxi(l, l.shape.ifEmpty {
                 listOfNotNull(l.taxiPickup, l.taxiDropoff)
             }))
-            Moovit.LegKind.BIKE -> out.add(Step.Cycle(l, l.shape.ifEmpty { whole }))
+            Moovit.LegKind.BIKE -> out.add(Step.Cycle(
+                l, l.shape.ifEmpty { whole },
+                l.shape.lastOrNull()
+                    ?: all.drop(i + 1).firstNotNullOfOrNull { it.shape.firstOrNull() }
+                    ?: whole.lastOrNull(),
+            ))
             else -> {}
         }
     }
@@ -375,6 +383,8 @@ internal fun StepCard(
 
         is Step.Cycle -> Card(T("Cycle ${step.leg.minutes} min", "אופניים ${step.leg.minutes} דק׳"), active) {
             Text(T("Follow the route to your next stop", "המשיכו במסלול אל התחנה הבאה"), fontSize = 15.sp, color = K.text)
+            Spacer(Modifier.height(K.gap2))
+            GoogleMapsButton(step.dest, "b")
         }
 
         is Step.Wait -> {
@@ -691,6 +701,7 @@ private fun NavigateMap(
     }.orEmpty()
     val focus = chosenFocus.ifEmpty { step?.focus.orEmpty() }
         .ifEmpty { legs.flatMap { it.shape } }
+        .ifEmpty { listOfNotNull(fix?.let { it.lat to it.lon }) }
     val framedPoints = focus + listOfNotNull(focusedVehicle?.let { it.lat to it.lon })
     val mePulse = animateFloatAsState(if (here == null) 0f else 1f, tween(350), label = "meReveal")
     val vehicleAlpha = animateFloatAsState(if (vehicles.isEmpty()) 0f else 1f, tween(350), label = "vehicleReveal")
