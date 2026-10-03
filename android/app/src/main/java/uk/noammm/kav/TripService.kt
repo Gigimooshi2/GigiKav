@@ -47,6 +47,7 @@ class TripService : Service() {
     override fun onBind(intent: Intent?) = null
 
     override fun onCreate() {
+        AutoUpdate.tripRunning = true
         super.onCreate()
         T.lang = Prefs.lang(this)
         ensureChannel(this)
@@ -65,6 +66,7 @@ class TripService : Service() {
     }
 
     override fun onDestroy() {
+        AutoUpdate.tripRunning = false
         handler.removeCallbacksAndMessages(null)
         tracking?.invoke()
         tracking = null

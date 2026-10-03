@@ -119,6 +119,9 @@
                 android:value="ongoing transit trip status" />
         </service>
 
+        <!-- result of an app-update install -->
+        <receiver android:name=".UpdateResultReceiver" android:exported="false" />
+
         <!-- "Ignore" on a faster-route notification -->
         <receiver android:name=".RerouteReceiver" android:exported="false" />
 

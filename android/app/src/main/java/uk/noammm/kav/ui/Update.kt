@@ -155,5 +155,31 @@ fun UpdateSection(model: KavModel) {
         }
         if (release != null) ReleaseNotes(release, maxHeight = 200.dp)
         UpdateProgress(model)
+        var auto by remember { mutableStateOf(uk.noammm.kav.Prefs.autoUpdate(ctx)) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(T("Update in the background", "עדכון ברקע"), fontSize = 14.sp, color = K.text)
+                Text(
+                    T(
+                        "Downloads new versions quietly and installs them while Kav is closed and no trip is running.",
+                        "מוריד גרסאות חדשות בשקט ומתקין אותן כש-Kav סגורה ואין נסיעה פעילה.",
+                    ),
+                    fontSize = 12.sp, color = K.dim,
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = auto,
+                onCheckedChange = { on ->
+                    auto = on
+                    uk.noammm.kav.Prefs.setAutoUpdate(ctx, on)
+                    uk.noammm.kav.AutoUpdate.schedule(ctx)
+                    if (on && !Updates.canInstall(ctx)) Updates.askInstallPermission(ctx)
+                },
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = K.accent),
+            )
+        }
+        if (auto && !Updates.canInstall(ctx)) Chip(
+            T("Allow Kav to install updates", "אפשרו ל-Kav להתקין עדכונים"), false,
+        ) { Updates.askInstallPermission(ctx) }
     }
 }

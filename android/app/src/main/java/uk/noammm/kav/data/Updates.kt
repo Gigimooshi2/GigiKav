@@ -123,6 +123,10 @@ object Updates {
     }
 
     fun install(ctx: Context, file: File) {
+        // Session install makes Kav its own installer, which is what lets later updates go silent.
+        try { uk.noammm.kav.AutoUpdate.install(ctx, file, silent = false); return } catch (e: Exception) {
+            android.util.Log.w("KavUpdate", "session install failed, falling back", e)
+        }
         val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.updates", file)
         ctx.startActivity(
             Intent(Intent.ACTION_VIEW)

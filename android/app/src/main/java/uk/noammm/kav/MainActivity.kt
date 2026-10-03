@@ -124,6 +124,13 @@ object PendingBackup {
 }
 
 class MainActivity : ComponentActivity() {
+    override fun onStart() { super.onStart(); AutoUpdate.visible = true }
+    override fun onStop() {
+        super.onStop()
+        AutoUpdate.visible = false
+        if (!isChangingConfigurations) AutoUpdate.soon(this)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -144,6 +151,7 @@ class MainActivity : ComponentActivity() {
         }
         intent?.getStringExtra(PlacesWidget.EXTRA_SET)?.let { PendingLink.favourite = it }
         Reroute.load(this)
+        AutoUpdate.schedule(this)
         if (intent?.action == Reroute.ACTION_SWITCH) Reroute.accept(this)
         if (intent?.action == PendingLink.ACTION_OPEN_TRIP) PendingLink.openTrip = true
         setContent {
@@ -1102,6 +1110,13 @@ object Prefs {
     fun setPlacesKey(ctx: Context, key: String?) {
         store(ctx).edit().apply { if (key.isNullOrBlank()) remove("placesKey") else putString("placesKey", key.trim()) }.apply()
     }
+
+    fun autoUpdate(ctx: Context): Boolean = store(ctx).getBoolean("autoUpdate", true)
+    fun setAutoUpdate(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("autoUpdate", on).apply()
+    fun lastUpdateCheck(ctx: Context): Long = store(ctx).getLong("lastUpdateCheck", 0L)
+    fun setLastUpdateCheck(ctx: Context, t: Long) = store(ctx).edit().putLong("lastUpdateCheck", t).apply()
+    fun pendingUpdate(ctx: Context): String? = store(ctx).getString("pendingUpdate", null)
+    fun setPendingUpdate(ctx: Context, v: String?) = store(ctx).edit().putString("pendingUpdate", v).apply()
 
     fun privateSearch(ctx: Context): Boolean = store(ctx).getBoolean("privateSearch", true)
     fun setPrivateSearch(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("privateSearch", on).apply()
