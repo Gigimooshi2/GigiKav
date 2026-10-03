@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -64,6 +65,9 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
                 { on -> Shown.co2 = on; Prefs.setShowCo2(ctx, on) },
             ) { GlobeGlyph(if (Shown.co2) K.text else K.dim, K.surface1, 18.dp) }
         }
+
+        Group(T("search", "חיפוש"))
+        PlacesKeyRow(ctx)
 
         Group(T("privacy", "פרטיות"))
         Column(Modifier.fillMaxWidth().padding(horizontal = K.gap3)) {
@@ -283,3 +287,61 @@ private fun Absent(title: String, desc: String) {
     }
 }
 
+
+
+/** Paste-in Google Places key: businesses in search, like Moovit's app. Stored only on the phone. */
+@Composable
+private fun PlacesKeyRow(ctx: android.content.Context) {
+    var saved by remember { mutableStateOf(uk.noammm.kav.Prefs.placesKey(ctx)) }
+    var open by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = K.gap3).glassSurface(K.rCard)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button) { open = !open; draft = "" }
+            .padding(K.gap4),
+    ) {
+        Text(T("Google Places key", "מפתח Google Places"), fontSize = 16.sp, color = K.text)
+        Text(
+            saved?.let { T("Set (…${it.takeLast(4)}). Businesses come from Google.", "מוגדר (…${it.takeLast(4)}). עסקים מגיעים מ-Google.") }
+                ?: T("Not set. Search finds addresses and stops from Moovit only.", "לא מוגדר. החיפוש מוצא רק כתובות ותחנות מ-Moovit."),
+            fontSize = 13.sp, color = K.dim,
+        )
+        if (open) {
+            Spacer(Modifier.height(K.gap3))
+            Text(
+                T(
+                    "Kept only on this phone. Your searches go to Google while it's set; " +
+                        "if the key fails or hits its daily quota, search falls back to Moovit.",
+                    "נשמר רק בטלפון הזה. כל עוד הוא מוגדר החיפושים נשלחים ל-Google; " +
+                        "אם המפתח נכשל או מגיע למכסה היומית, החיפוש חוזר ל-Moovit.",
+                ),
+                fontSize = 12.sp, color = K.dim,
+            )
+            Spacer(Modifier.height(K.gap2))
+            KavField(draft, { draft = it.trim() }, T("Paste key (AIza…)", "הדביקו מפתח (AIza…)"), Modifier.fillMaxWidth())
+            Spacer(Modifier.height(K.gap2))
+            Row(horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+                Text(
+                    T("Save", "שמירה"), fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    color = if (draft.isNotBlank()) K.onAccent else K.dim,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp))
+                        .background(if (draft.isNotBlank()) K.accent else K.surface4)
+                        .clickable(enabled = draft.isNotBlank()) {
+                            uk.noammm.kav.Prefs.setPlacesKey(ctx, draft)
+                            saved = uk.noammm.kav.Prefs.placesKey(ctx); open = false; draft = ""
+                        }
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                )
+                if (saved != null) Text(
+                    T("Remove key", "הסרת המפתח"), fontSize = 14.sp, color = K.text,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(K.surface4)
+                        .clickable {
+                            uk.noammm.kav.Prefs.setPlacesKey(ctx, null)
+                            saved = null; open = false; draft = ""
+                        }
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                )
+            }
+        }
+    }
+}

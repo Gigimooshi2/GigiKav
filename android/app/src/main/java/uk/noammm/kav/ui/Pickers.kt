@@ -40,6 +40,7 @@ import uk.noammm.kav.data.Net
 import uk.noammm.kav.data.nearestStops
 import uk.noammm.kav.data.stopsMatching
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 
@@ -131,6 +132,10 @@ fun PlacePicker(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val q = query
     var places by remember { mutableStateOf<List<Moovit.Place>>(emptyList()) }
+    var google by remember { mutableStateOf<List<uk.noammm.kav.data.GooglePlaces.Suggestion>>(emptyList()) }
+    var resolving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val placesKey = remember { uk.noammm.kav.Prefs.placesKey(ctx) }
     var stations by remember { mutableStateOf<List<Moovit.Place>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -167,7 +172,7 @@ fun PlacePicker(
     LaunchedEffect(q) {
         error = null
         if (q.isBlank()) {
-            places = emptyList(); stations = emptyList(); busy = false
+            places = emptyList(); stations = emptyList(); google = emptyList(); busy = false
             return@LaunchedEffect
         }
         busy = true
@@ -195,12 +200,26 @@ fun PlacePicker(
                 Result.failure(e)
             }
         }
+        // Businesses come from Google when the user has set a key; any failure (quota, no network) just leaves Moovit's results.
+        val fromGoogle = async<List<uk.noammm.kav.data.GooglePlaces.Suggestion>>(kotlinx.coroutines.Dispatchers.IO) {
+            val key = placesKey ?: return@async emptyList()
+            if (q.trim().length < 3) return@async emptyList()
+            try {
+                uk.noammm.kav.data.GooglePlaces.autocomplete(key, ctx.packageName, q.trim(), at?.takeIf { Moovit.shareLocation })
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("KavPlaces", "Google autocomplete failed", e)
+                emptyList()
+            }
+        }
         val waited = kotlinx.coroutines.withTimeoutOrNull(3000) { online.await() }
         stations = near.await()
         busy = waited == null && stations.isEmpty()
         val answer = waited ?: online.await()
         places = answer.getOrDefault(emptyList())
-        error = answer.exceptionOrNull()?.takeIf { stations.isEmpty() }?.let { it.message ?: it.javaClass.simpleName }
+        google = kotlinx.coroutines.withTimeoutOrNull(2500) { fromGoogle.await() } ?: emptyList()
+        error = answer.exceptionOrNull()?.takeIf { stations.isEmpty() && google.isEmpty() }?.let { it.message ?: it.javaClass.simpleName }
         busy = false
     }
 
@@ -222,7 +241,7 @@ fun PlacePicker(
         else locating = false
     }
     val showRecents = q.isBlank() && recents.isNotEmpty()
-    val found = q.isNotBlank() && (places.isNotEmpty() || stations.isNotEmpty())
+    val found = q.isNotBlank() && (places.isNotEmpty() || stations.isNotEmpty() || google.isNotEmpty())
 
     Box(Modifier.fillMaxSize().background(K.bg)) {
     FloatingTop(top = {
@@ -295,12 +314,12 @@ fun PlacePicker(
                 Note(T("Search a station, street or place.", "חפשו תחנה, רחוב או מקום."), Modifier.padding(horizontal = K.gap4, vertical = K.gap4))
             }
             q.isBlank() -> Unit
-            busy && places.isEmpty() && stations.isEmpty() -> item {
+            busy && places.isEmpty() && stations.isEmpty() && google.isEmpty() -> item {
                 Box(Modifier.fillMaxWidth().padding(vertical = K.gap8), contentAlignment = Alignment.Center) {
                     LoadingPulse(T("Searching", "מחפשים"))
                 }
             }
-            places.isEmpty() && stations.isEmpty() -> item {
+            places.isEmpty() && stations.isEmpty() && google.isEmpty() -> item {
                 Note(T("Nothing found.", "לא נמצאו תוצאות."), Modifier.padding(horizontal = K.gap4, vertical = K.gap4))
             }
         }
@@ -318,8 +337,37 @@ fun PlacePicker(
             }
             items(recents) { p -> Box(Modifier.padding(horizontal = K.gap2)) { PlaceRow(p) { pick(p) } } }
         } else if (found) {
-            if (places.isNotEmpty()) item { Box(Modifier.padding(horizontal = K.gap2)) { SectionTitle(T("Places", "מקומות")) } }
-            items(places) { p -> Box(Modifier.padding(horizontal = K.gap2)) { PlaceRow(p) { pick(p) } } }
+            // With Google results, they take the Places section (like Moovit's app); Moovit's addresses otherwise.
+            if (google.isNotEmpty() || places.isNotEmpty()) item { Box(Modifier.padding(horizontal = K.gap2)) { SectionTitle(T("Places", "מקומות")) } }
+            if (google.isNotEmpty()) items(google, key = { "g:" + it.placeId }) { s ->
+                val shown = Moovit.Place(s.main, s.secondary, Double.NaN, Double.NaN, meters = s.meters)
+                Box(Modifier.padding(horizontal = K.gap2)) {
+                    PlaceRow(shown) {
+                        val key = placesKey ?: return@PlaceRow
+                        if (resolving) return@PlaceRow
+                        resolving = true
+                        scope.launch {
+                            val p = try {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    uk.noammm.kav.data.GooglePlaces.resolve(key, ctx.packageName, s)
+                                }
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                android.util.Log.w("KavPlaces", "Google details failed", e)
+                                null
+                            }
+                            resolving = false
+                            if (p != null && !p.lat.isNaN() && !p.lon.isNaN()) pick(p)
+                            else android.widget.Toast.makeText(
+                                ctx, T("Couldn't open that place.", "לא הצלחנו לפתוח את המקום."),
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    }
+                }
+            }
+            else items(places) { p -> Box(Modifier.padding(horizontal = K.gap2)) { PlaceRow(p) { pick(p) } } }
             if (stations.isNotEmpty()) item { Box(Modifier.padding(horizontal = K.gap2)) { SectionTitle(T("Stations", "תחנות")) } }
             items(stations) { p -> Box(Modifier.padding(horizontal = K.gap2)) { PlaceRow(p) { pick(p) } } }
         }

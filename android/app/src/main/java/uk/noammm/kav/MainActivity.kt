@@ -1097,6 +1097,12 @@ object Prefs {
     fun liquidGlass(ctx: Context): Boolean = liquidGlassReady && store(ctx).getBoolean("liquidGlass", true)
     fun setLiquidGlass(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("liquidGlass", on).apply()
 
+    /** User's own Google Places key. Lives only on this phone: not in backups, the repo or the APK. */
+    fun placesKey(ctx: Context): String? = store(ctx).getString("placesKey", null)?.takeIf { it.isNotBlank() }
+    fun setPlacesKey(ctx: Context, key: String?) {
+        store(ctx).edit().apply { if (key.isNullOrBlank()) remove("placesKey") else putString("placesKey", key.trim()) }.apply()
+    }
+
     fun privateSearch(ctx: Context): Boolean = store(ctx).getBoolean("privateSearch", true)
     fun setPrivateSearch(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("privateSearch", on).apply()
 
