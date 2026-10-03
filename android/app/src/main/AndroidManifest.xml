@@ -119,6 +119,18 @@
                 android:value="ongoing transit trip status" />
         </service>
 
+        <!-- picks which saved places a widget shows -->
+        <activity
+            android:name=".WidgetConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="uk.noammm.kav.widget"
+            android:theme="@style/Theme.Kav">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <!-- home-screen widget: saved places, one tap to directions -->
         <receiver
             android:name=".PlacesWidget"

@@ -106,6 +106,8 @@ object Pip {
 
 object PendingLink {
     var plan by mutableStateOf<MoovitLink.Plan?>(null)
+    /** Saved-place id to set, from tapping an unset place on the widget. */
+    var favourite by mutableStateOf<String?>(null)
 }
 
 object PendingBackup {
@@ -137,6 +139,7 @@ class MainActivity : ComponentActivity() {
         if (!PendingBackup.offer(this, intent?.data)) {
             MoovitLink.parse(intent?.dataString)?.let { PendingLink.plan = it }
         }
+        intent?.getStringExtra(PlacesWidget.EXTRA_SET)?.let { PendingLink.favourite = it }
         setContent {
             val light = K.light
             val view = androidx.compose.ui.platform.LocalView.current
@@ -171,6 +174,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         if (PendingBackup.offer(this, intent.data)) return
         MoovitLink.parse(intent.dataString)?.let { PendingLink.plan = it }
+        intent.getStringExtra(PlacesWidget.EXTRA_SET)?.let { PendingLink.favourite = it }
     }
 }
 
@@ -395,6 +399,17 @@ private fun Shell(model: KavModel) {
             model.pendingLink = plan
             model.settingsOpen = false
             model.tab = Tab.Directions
+        }
+    }
+
+    LaunchedEffect(model) {
+        snapshotFlow { PendingLink.favourite }.collect { id ->
+            if (id == null) return@collect
+            PendingLink.favourite = null
+            val fav = model.favourites.firstOrNull { it.id == id } ?: return@collect
+            model.settingsOpen = false
+            model.tab = Tab.Directions
+            model.settingFavourite = fav
         }
     }
 

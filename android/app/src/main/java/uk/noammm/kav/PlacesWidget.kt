@@ -15,6 +15,7 @@ import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Place
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.asAndroidPath
@@ -29,10 +30,28 @@ import uk.noammm.kav.ui.FavouriteIcons
 class PlacesWidget : AppWidgetProvider() {
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) = render(ctx, mgr, ids)
 
+    override fun onDeleted(ctx: Context, ids: IntArray) {
+        val e = store(ctx).edit()
+        ids.forEach { e.remove("hidden_$it") }
+        e.apply()
+    }
+
     override fun onAppWidgetOptionsChanged(ctx: Context, mgr: AppWidgetManager, id: Int, options: Bundle) =
         render(ctx, mgr, intArrayOf(id))
 
     companion object {
+        const val EXTRA_SET = "uk.noammm.kav.SET_FAVOURITE"
+
+        private fun store(ctx: Context) = ctx.getSharedPreferences("kav_widget", Context.MODE_PRIVATE)
+
+        /** Places hidden on this widget. Stored as hidden (not shown) so new saved places appear by default. */
+        fun hidden(ctx: Context, widgetId: Int): Set<String> =
+            store(ctx).getStringSet("hidden_$widgetId", emptySet())?.toSet() ?: emptySet()
+
+        fun setHidden(ctx: Context, widgetId: Int, ids: Set<String>) {
+            store(ctx).edit().putStringSet("hidden_$widgetId", ids).apply()
+        }
+
         fun refresh(ctx: Context) {
             runCatching {
                 val mgr = AppWidgetManager.getInstance(ctx) ?: return
@@ -42,24 +61,37 @@ class PlacesWidget : AppWidgetProvider() {
         }
 
         private fun render(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
-            val places = Prefs.favourites(ctx).filter { it.place != null }
+            val all = Prefs.favourites(ctx)
             val iconPx = (26 * ctx.resources.displayMetrics.density).toInt()
-            val bitmaps = places.associate { f ->
+            val bitmaps = all.associate { f ->
                 f.id to iconBitmap(FavouriteIcons.firstOrNull { it.first == f.icon }?.second ?: Icons.Rounded.Place, iconPx)
             }
+            val editIcon = iconBitmap(Icons.Rounded.Edit, (18 * ctx.resources.displayMetrics.density).toInt())
             for (id in ids) {
+                val hide = hidden(ctx, id)
+                val places = all.filter { it.id !in hide }
                 val root = RemoteViews(ctx.packageName, R.layout.widget_places)
                 root.removeAllViews(R.id.widget_row)
+                root.setImageViewBitmap(R.id.widget_edit, editIcon)
+                root.setOnClickPendingIntent(R.id.widget_edit, configure(ctx, id))
                 if (places.isEmpty()) {
                     root.setViewVisibility(R.id.widget_empty, View.VISIBLE)
-                    root.setOnClickPendingIntent(R.id.widget_empty, openApp(ctx))
+                    root.setOnClickPendingIntent(R.id.widget_empty, configure(ctx, id))
                 } else {
                     root.setViewVisibility(R.id.widget_empty, View.GONE)
-                    places.forEachIndexed { i, f ->
+                    places.forEach { f ->
                         val item = RemoteViews(ctx.packageName, R.layout.widget_place)
                         item.setTextViewText(R.id.widget_label, f.name)
                         bitmaps[f.id]?.let { item.setImageViewBitmap(R.id.widget_icon, it) }
-                        item.setOnClickPendingIntent(R.id.widget_item, directions(ctx, f.place!!, i))
+                        val p = f.place
+                        if (p != null) {
+                            item.setOnClickPendingIntent(R.id.widget_item, directions(ctx, p, f.id))
+                        } else {
+                            // Not set yet (e.g. Home): tap to set it in the app.
+                            item.setInt(R.id.widget_icon, "setBackgroundResource", R.drawable.widget_icon_bg_unset)
+                            item.setTextColor(R.id.widget_label, 0x99FFFFFF.toInt())
+                            item.setOnClickPendingIntent(R.id.widget_item, setPlace(ctx, f.id))
+                        }
                         root.addView(R.id.widget_row, item)
                     }
                 }
@@ -67,7 +99,22 @@ class PlacesWidget : AppWidgetProvider() {
             }
         }
 
-        private fun directions(ctx: Context, p: Moovit.Place, i: Int): PendingIntent {
+        private fun configure(ctx: Context, widgetId: Int): PendingIntent = PendingIntent.getActivity(
+            ctx, 5000 + widgetId,
+            Intent(ctx, WidgetConfigActivity::class.java)
+                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        private fun setPlace(ctx: Context, favId: String): PendingIntent = PendingIntent.getActivity(
+            ctx, 2000 + (favId.hashCode() and 0xFFFF),
+            Intent(ctx, MainActivity::class.java).putExtra(EXTRA_SET, favId)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        private fun directions(ctx: Context, p: Moovit.Place, favId: String): PendingIntent {
             // Same link Kav already opens for shared trips; no origin means "from where I am".
             val uri = Uri.Builder().scheme("moovit").authority("directions")
                 .appendQueryParameter("dest_lat", p.lat.toString())
@@ -77,7 +124,7 @@ class PlacesWidget : AppWidgetProvider() {
             val intent = Intent(Intent.ACTION_VIEW, uri).setPackage(ctx.packageName)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             return PendingIntent.getActivity(
-                ctx, 1000 + i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ctx, 1000 + (favId.hashCode() and 0xFFFF), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         }
 
