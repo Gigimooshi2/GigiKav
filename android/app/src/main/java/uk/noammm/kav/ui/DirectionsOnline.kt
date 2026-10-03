@@ -78,6 +78,7 @@ fun DirectionsOnline(model: KavModel) {
     var departAt by remember { mutableLongStateOf(0L) }
     var nudgedAt by remember { mutableLongStateOf(0L) }
     var shifting by remember { mutableStateOf(false) }
+    var resumeSignal by remember { mutableIntStateOf(0) }
     val shiftScope = rememberCoroutineScope()
     var timeType by remember { mutableIntStateOf(Moovit.TIME_DEPARTURE) }
     var whenOpen by remember { mutableStateOf(false) }
@@ -267,7 +268,7 @@ fun DirectionsOnline(model: KavModel) {
         if (!uk.noammm.kav.PendingLink.openTrip) return@LaunchedEffect
         uk.noammm.kav.PendingLink.openTrip = false
         val journey = model.activeJourney ?: return@LaunchedEffect
-        if (open?.trip === journey.trip) return@LaunchedEffect
+        if (open?.trip === journey.trip) { resumeSignal++; return@LaunchedEffect }
         picking = null; autoOpen = null; linkTrip = null
         open = OpenTrip(journey.trip, journey.resolved, journey.fromLabel, journey.toLabel, resume = true)
     }
@@ -367,6 +368,8 @@ fun DirectionsOnline(model: KavModel) {
                 onNavigating = { model.navigating = it },
                 onShift = if (chosen.resume || active != null) null else { d -> shiftOpen(d) },
                 shifting = shifting,
+                active = active != null,
+                resumeSignal = resumeSignal,
                 onEnd = {
                     if (model.activeJourney?.trip === chosen.trip) model.activeJourney = null
                     toPlace?.let {

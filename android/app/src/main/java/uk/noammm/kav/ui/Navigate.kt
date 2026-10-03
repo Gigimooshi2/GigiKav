@@ -143,7 +143,7 @@ internal fun chosenLegs(trip: Moovit.Itinerary, chosen: Map<Int, Int>): List<Moo
     }
 
 @Composable
-fun StartButton(onClick: () -> Unit) {
+fun StartButton(resume: Boolean = false, onClick: () -> Unit) {
     Row(
         Modifier.clip(RoundedCornerShape(999.dp)).background(K.live)
             .clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 11.dp),
@@ -160,7 +160,7 @@ fun StartButton(onClick: () -> Unit) {
             )
         }
         Spacer(Modifier.width(9.dp))
-        Text(T("Start", "התחלה"), fontSize = 14.sp, color = K.onAccent, fontWeight = FontWeight.Medium)
+        Text(if (resume) T("Resume", "המשך") else T("Start", "התחלה"), fontSize = 14.sp, color = K.onAccent, fontWeight = FontWeight.Medium)
     }
 }
 

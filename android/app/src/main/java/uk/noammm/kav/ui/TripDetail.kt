@@ -65,11 +65,18 @@ fun TripDetailScreen(
     onNavigating: (Boolean) -> Unit = {},
     onShift: ((Int) -> Unit)? = null,
     shifting: Boolean = false,
+    active: Boolean = false,
+    resumeSignal: Int = 0,
 ) {
     var tracking by remember { mutableStateOf<Pair<Moovit.Leg, Int>?>(null) }
     var navigating by remember(trip) { mutableStateOf(startInNavigation) }
     var planFromNavigation by remember(trip) { mutableStateOf(false) }
     LaunchedEffect(navigating) { onNavigating(navigating) }
+    // Trip notification tapped while this page sits on the plan: jump into navigation.
+    val seenSignal = remember(trip) { resumeSignal }
+    LaunchedEffect(resumeSignal) {
+        if (resumeSignal != seenSignal) { tracking = null; planFromNavigation = false; navigating = true }
+    }
     DisposableEffect(Unit) { onDispose { onNavigating(false) } }
     var alert by remember { mutableStateOf<Pair<Int, String>?>(null) }
     fun leavePlan() {
@@ -107,7 +114,7 @@ fun TripDetailScreen(
             else -> TripDetailBody(trip, r, fromLabel, toLabel, onBack = ::leavePlan,
                 onTrack = { leg, stopId -> tracking = leg to stopId },
                 onStart = { navigating = true; planFromNavigation = false; onStart() },
-                onShift = onShift, shifting = shifting)
+                onShift = onShift, shifting = shifting, active = active)
         }
     }
     alert?.let { (group, label) ->
@@ -127,6 +134,7 @@ private fun TripDetailBody(
     onStart: () -> Unit,
     onShift: ((Int) -> Unit)? = null,
     shifting: Boolean = false,
+    active: Boolean = false,
 ) {
 
     Column(Modifier.fillMaxSize()) {
@@ -145,7 +153,7 @@ private fun TripDetailBody(
                 Spacer(Modifier.width(K.gap2))
                 RerouteToggle()
                 Spacer(Modifier.width(K.gap2))
-                StartButton(onStart)
+                StartButton(resume = active, onClick = onStart)
             }
         }
 
