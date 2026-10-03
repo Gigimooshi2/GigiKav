@@ -15,8 +15,35 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
-      - name: Use fixed signing key
-        run: mkdir -p ~/.android && cp signing/debug.keystore ~/.android/debug.keystore
+
+      # Offline timetable (il.kav) isn't in the repo. Rebuild it from the
+      # Ministry of Transport GTFS once a day; fall back to upstream's copy.
+      - name: Timetable cache key
+        id: day
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: kavcache
+        with:
+          path: android/app/src/main/assets/il.kav
+          key: il-kav-${{ steps.day.outputs.day }}
+      - name: Build offline timetable
+        if: steps.kavcache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p android/app/src/main/assets
+          if sh tools/fetch.sh && KAV_REGION=il KAV_BBOX=national python3 tools/export_web_bundle.py; then
+            echo "Built il.kav from GTFS"
+          else
+            echo "GTFS build failed, taking il.kav from the upstream release"
+            url=$(curl -sSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/ImNoammm/kav/releases/latest \
+              | python3 -c "import sys,json; print(next(a['browser_download_url'] for a in json.load(sys.stdin)['assets'] if a['name'].endswith('.apk')))")
+            curl -sSL -o /tmp/upstream.apk "$url"
+            unzip -p /tmp/upstream.apk assets/il.kav > android/app/src/main/assets/il.kav
+          fi
+          ls -l android/app/src/main/assets/il.kav
+          test -s android/app/src/main/assets/il.kav
+
       - name: Build release APK
         working-directory: android
         run: chmod +x gradlew && ./gradlew assembleRelease --stacktrace
@@ -26,7 +53,7 @@ jobs:
           cp android/app/build/outputs/apk/release/*.apk out/GigiKav-${{ github.run_number }}.apk
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
+          tag_name: v2.0.${{ github.run_number }}
           name: Build ${{ github.run_number }}
           body: ${{ github.event.head_commit.message }}
           files: out/*.apk

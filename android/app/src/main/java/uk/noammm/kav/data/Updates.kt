@@ -13,8 +13,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 object Updates {
-    const val OWNER = "ImNoammm"
-    const val REPO = "kav"
+    const val OWNER = "Gigimooshi2"
+    const val REPO = "GigiKav"
     const val PAGE = "https://github.com/$OWNER/$REPO/releases"
 
     class Release(
