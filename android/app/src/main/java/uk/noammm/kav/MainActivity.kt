@@ -140,6 +140,8 @@ class MainActivity : ComponentActivity() {
             MoovitLink.parse(intent?.dataString)?.let { PendingLink.plan = it }
         }
         intent?.getStringExtra(PlacesWidget.EXTRA_SET)?.let { PendingLink.favourite = it }
+        Reroute.load(this)
+        if (intent?.action == Reroute.ACTION_SWITCH) Reroute.accept(this)
         setContent {
             val light = K.light
             val view = androidx.compose.ui.platform.LocalView.current
@@ -175,6 +177,7 @@ class MainActivity : ComponentActivity() {
         if (PendingBackup.offer(this, intent.data)) return
         MoovitLink.parse(intent.dataString)?.let { PendingLink.plan = it }
         intent.getStringExtra(PlacesWidget.EXTRA_SET)?.let { PendingLink.favourite = it }
+        if (intent.action == Reroute.ACTION_SWITCH) Reroute.accept(this)
     }
 }
 
@@ -454,6 +457,16 @@ private fun Shell(model: KavModel) {
                 ))
             }
         }
+    }
+
+    // Smart reroute: keep looking for a faster way while the trip runs.
+    LaunchedEffect(model.activeJourney?.trip, Reroute.enabled) {
+        if (model.activeJourney == null || !Reroute.enabled) { Reroute.clear(ctx); return@LaunchedEffect }
+        Reroute.clear(ctx)
+        Reroute.run(ctx, model)
+    }
+    LaunchedEffect(Reroute.switchTo) {
+        if (Reroute.switchTo != null) { model.settingsOpen = false; model.tab = Tab.Directions }
     }
 
     val journeyActive = model.activeJourney != null
@@ -1171,6 +1184,9 @@ object Prefs {
         e.putStringSet("filtersOff", off.map { it.name }.toSet())
         e.apply()
     }
+
+    fun reroute(ctx: Context): Boolean = store(ctx).getBoolean("reroute", false)
+    fun setReroute(ctx: Context, on: Boolean) { store(ctx).edit().putBoolean("reroute", on).apply() }
 
     fun favourites(ctx: Context): List<Favourite> = try {
         val arr = org.json.JSONArray(store(ctx).getString("favourites", "[]"))

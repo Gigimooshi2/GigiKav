@@ -119,6 +119,9 @@
                 android:value="ongoing transit trip status" />
         </service>
 
+        <!-- "Ignore" on a faster-route notification -->
+        <receiver android:name=".RerouteReceiver" android:exported="false" />
+
         <!-- picks which saved places a widget shows -->
         <activity
             android:name=".WidgetConfigActivity"

@@ -262,6 +262,19 @@ fun DirectionsOnline(model: KavModel) {
 
     val under by underSearch(picking != null)
 
+    // Accepted faster route: replace the running trip and keep navigating.
+    LaunchedEffect(uk.noammm.kav.Reroute.switchTo) {
+        val o = uk.noammm.kav.Reroute.switchTo ?: return@LaunchedEffect
+        uk.noammm.kav.Reroute.switchTo = null
+        val toLabel = model.activeJourney?.toLabel ?: open?.toLabel ?: T("Destination", "יעד")
+        val fromLabel = T("Current location", "המיקום הנוכחי")
+        model.journeyStep = 0
+        model.activeJourney = ActiveJourney(o.trip, o.resolved, fromLabel, toLabel)
+        picking = null; autoOpen = null; linkTrip = null
+        showResults = true
+        open = OpenTrip(o.trip, o.resolved, fromLabel, toLabel, resume = true)
+    }
+
     // Same route, one departure earlier or later (like Moovit's single-route page).
     fun shiftOpen(dir: Int) {
         val cur = open ?: return

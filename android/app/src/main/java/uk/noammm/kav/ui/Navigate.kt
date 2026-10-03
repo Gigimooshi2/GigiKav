@@ -228,6 +228,7 @@ fun NavigateScreen(
                         Text("${dur((trip.arr - now).toInt().coerceAtLeast(0))} · ${hm.format(Date(trip.arr * 1000))}",
                             fontSize = 12.sp, color = K.muted, maxLines = 1)
                     }
+                    RerouteToggle(glass = false)
                     Box(
                         Modifier.size(48.dp).clip(RoundedCornerShape(24.dp))
                             .semantics { contentDescription = T("Show trip plan", "הצגת המסלול") }
@@ -253,6 +254,7 @@ fun NavigateScreen(
                     }
                     Spacer(Modifier.height(K.gap2))
                 }
+                RerouteBanner(Modifier.padding(bottom = K.gap2))
                 val ceiling = with(LocalDensity.current) { cardHeight.roundToPx() }
                 val pageHeights = remember(steps) { mutableStateMapOf<Int, Int>() }
                 HorizontalPager(

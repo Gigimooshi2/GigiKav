@@ -143,6 +143,8 @@ private fun TripDetailBody(
                 trip.legs.none { it.kind == Moovit.LegKind.RIDE }
             if (!taxiOnly) {
                 Spacer(Modifier.width(K.gap2))
+                RerouteToggle()
+                Spacer(Modifier.width(K.gap2))
                 StartButton(onStart)
             }
         }

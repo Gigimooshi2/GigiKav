@@ -42,6 +42,13 @@ fun PipOverlay(model: KavModel) {
             Box(Modifier.width(4.dp).fillMaxHeight(.7f).clip(RoundedCornerShape(999.dp)).background(K.accent))
             Spacer(Modifier.width(K.gap3))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                uk.noammm.kav.Reroute.offer?.let { o ->
+                    Text(
+                        o.headline + " · −" + ((o.gain + 30) / 60) + T(" min", " דק׳"),
+                        fontSize = 11.sp, lineHeight = 13.sp, color = K.accent, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
                     title, fontSize = 15.sp, lineHeight = 19.sp, color = K.text, fontWeight = FontWeight.SemiBold,
                     maxLines = if (cells.isEmpty()) 2 else 1, overflow = TextOverflow.Ellipsis,
