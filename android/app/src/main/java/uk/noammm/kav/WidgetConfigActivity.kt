@@ -41,6 +41,7 @@ class WidgetConfigActivity : ComponentActivity() {
 
         T.lang = Prefs.lang(this)
         K.accent = Color(Prefs.accent(this))
+        K.pack = Prefs.pack(this)
         K.applyTheme(Prefs.look(this))
 
         setContent {

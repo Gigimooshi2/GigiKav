@@ -51,14 +51,16 @@ private val paneFill get() = K.surface1.copy(alpha = .62f)
 @Composable
 fun Modifier.glassSurface(radius: Dp = 22.dp): Modifier {
     if (!K.liquid) return panel(radius, solid = true)
-    val shape = RoundedCornerShape(radius)
+    val shape = RoundedCornerShape(K.r(radius))
     val liquid = LocalLiquidBackdrop.current
     val pane = if (liquid != null) liquidPane(liquid, radius) else clip(shape).background(paneFill)
     return pane.border(1.dp, liquidRim(floating = true), shape)
 }
 
 fun Modifier.panel(radius: Dp = K.rCard, solid: Boolean = false): Modifier {
-    val shape = RoundedCornerShape(radius)
+    val shape = RoundedCornerShape(K.r(radius))
+    // Google/Moovit packs: flat, opaque tonal cards with no outline.
+    if (!K.outlined) return clip(shape).background(K.surface1)
     val body = clip(shape).background(if (solid) paneFill.compositeOver(K.bg) else paneFill)
     return if (K.liquid) body.border(1.dp, liquidRim(floating = solid), shape)
         else body.border(0.5.dp, K.text.copy(alpha = .14f), shape)

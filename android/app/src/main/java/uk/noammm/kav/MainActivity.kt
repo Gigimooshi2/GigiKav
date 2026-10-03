@@ -136,6 +136,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Prefs.upgrade(this)
         K.accent = Color(Prefs.accent(this))
+        K.pack = Prefs.pack(this)
         K.applyTheme(Prefs.look(this))
         K.liquid = Prefs.liquidGlass(this)
         Shown.co2 = Prefs.showCo2(this)
@@ -259,6 +260,7 @@ class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
         favourites = Prefs.favourites(ctx)
         filters = Prefs.filters(ctx)
         K.accent = Color(Prefs.accent(ctx))
+        K.pack = Prefs.pack(ctx)
         K.applyTheme(Prefs.look(ctx))
         K.liquid = Prefs.liquidGlass(ctx)
         Shown.co2 = Prefs.showCo2(ctx)
@@ -1102,7 +1104,12 @@ object Prefs {
         Look.entries.firstOrNull { it.name.lowercase() == store(ctx).getString("look", null) } ?: Look.OLED
     fun setLook(ctx: Context, look: Look) = store(ctx).edit().putString("look", look.name.lowercase()).apply()
 
-    fun liquidGlass(ctx: Context): Boolean = liquidGlassReady && store(ctx).getBoolean("liquidGlass", true)
+    fun pack(ctx: Context): Pack = Pack.entries.firstOrNull { it.name == store(ctx).getString("pack", null) } ?: Pack.KAV
+    fun setPack(ctx: Context, p: Pack) = store(ctx).edit().putString("pack", p.name).apply()
+
+    // Liquid glass belongs to Kav's own pack; Google and Moovit looks are flat.
+    fun liquidGlass(ctx: Context): Boolean =
+        liquidGlassReady && pack(ctx) == Pack.KAV && store(ctx).getBoolean("liquidGlass", true)
     fun setLiquidGlass(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("liquidGlass", on).apply()
 
     /** User's own Google Places key. Lives only on this phone: not in backups, the repo or the APK. */

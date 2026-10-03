@@ -44,6 +44,9 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
         Group(T("language", "שפה"))
         LanguageRow(ctx)
 
+        Group(T("theme pack", "ערכת עיצוב"))
+        PackChoices(inset = K.gap4)
+
         Group(T("colour", "צבע"))
         AccentPreview(Modifier.padding(horizontal = K.gap4))
         Spacer(Modifier.height(K.gap4))
@@ -145,7 +148,7 @@ internal fun LookChoices(inset: Dp = 0.dp, heading: @Composable (String) -> Unit
             Chip(name, K.look == look) { K.applyTheme(look); Prefs.setLook(ctx, look) }
         }
     }
-    if (!liquidGlassReady) return
+    if (!liquidGlassReady || K.pack != Pack.KAV) return
     heading(T("glass", "זכוכית"))
     Row(Modifier.padding(horizontal = inset).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
         Chip(T("Liquid glass", "זכוכית נוזלית"), K.liquid, Modifier.border(1.5.dp, K.accent, RoundedCornerShape(22.dp))) {
@@ -344,4 +347,29 @@ private fun PlacesKeyRow(ctx: android.content.Context) {
             }
         }
     }
+}
+
+
+@Composable
+private fun PackChoices(inset: Dp) {
+    val ctx = LocalContext.current
+    Row(Modifier.padding(horizontal = inset).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+        for ((p, name) in listOf(Pack.KAV to "Kav", Pack.GOOGLE to "Google", Pack.MOOVIT to "Moovit")) {
+            Chip(name, K.pack == p) {
+                if (K.pack == p) return@Chip
+                K.pack = p
+                Prefs.setPack(ctx, p)
+                K.applyTheme(K.look)
+                K.liquid = Prefs.liquidGlass(ctx)
+                // Each pack brings its own accent; the colour picker below can still change it.
+                K.accent = p.accent
+                Prefs.setAccent(ctx, p.accent.toArgb())
+            }
+        }
+    }
+    Text(
+        T("Colours, corners and surfaces. Light, dark and OLED work with every pack.",
+            "צבעים, פינות ומשטחים. בהיר, כהה ו-OLED עובדים עם כל ערכה."),
+        fontSize = 11.sp, color = K.dim, modifier = Modifier.padding(horizontal = inset).padding(start = 2.dp, top = 6.dp),
+    )
 }
