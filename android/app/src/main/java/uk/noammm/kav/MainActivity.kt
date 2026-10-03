@@ -1129,12 +1129,15 @@ object Prefs {
         java.io.File(ctx.filesDir, "moovit-stops.bin").delete()
     }
 
+    // Fresh installs start with taxi and shared mobility hidden.
+    private val defaultOff = setOf(ResultFilter.TAXI.name, ResultFilter.SHARED.name)
+
     fun filters(ctx: Context): Set<ResultFilter> {
-        val off = store(ctx).getStringSet("filtersOff", emptySet()).orEmpty()
+        val off = store(ctx).getStringSet("filtersOff", null) ?: defaultOff
         return ResultFilter.entries.filter { it.name !in off }.toSet()
     }
     fun setFilter(ctx: Context, f: ResultFilter, on: Boolean) {
-        val off = store(ctx).getStringSet("filtersOff", emptySet()).orEmpty().toMutableSet()
+        val off = (store(ctx).getStringSet("filtersOff", null) ?: defaultOff).toMutableSet()
         if (on) off.remove(f.name) else off.add(f.name)
         store(ctx).edit().putStringSet("filtersOff", off).apply()
     }
