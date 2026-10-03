@@ -30,7 +30,9 @@ jobs:
         if: steps.kavcache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
+          exec > >(tee -a ci.log) 2>&1
           mkdir -p android/app/src/main/assets
           if sh tools/fetch.sh && KAV_REGION=il KAV_BBOX=national python3 tools/export_web_bundle.py; then
             echo "Built il.kav from GTFS"
@@ -46,7 +48,11 @@ jobs:
 
       - name: Build release APK
         working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleRelease --stacktrace
+        shell: bash
+        run: |
+          chmod +x gradlew
+          set -o pipefail
+          ./gradlew assembleRelease --stacktrace 2>&1 | tee -a ../ci.log
       - name: Rename APK
         run: |
           mkdir out
@@ -58,3 +64,12 @@ jobs:
           body: ${{ github.event.head_commit.message }}
           files: out/*.apk
           make_latest: true
+      - name: Publish log on failure
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ci-log
+          name: CI log (last failure)
+          prerelease: true
+          make_latest: false
+          files: ci.log
