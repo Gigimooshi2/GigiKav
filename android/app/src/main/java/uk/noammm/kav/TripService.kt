@@ -205,7 +205,7 @@ class TripService : Service() {
         }
 
         private fun openApp(ctx: Context): PendingIntent = PendingIntent.getActivity(
-            ctx, 0, Intent(ctx, MainActivity::class.java),
+            ctx, 0, Intent(ctx, MainActivity::class.java).setAction(PendingLink.ACTION_OPEN_TRIP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 

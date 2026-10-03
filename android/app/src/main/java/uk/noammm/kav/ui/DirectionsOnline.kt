@@ -262,6 +262,16 @@ fun DirectionsOnline(model: KavModel) {
 
     val under by underSearch(picking != null)
 
+    // Trip notification tapped: open the running trip, not the home screen.
+    LaunchedEffect(uk.noammm.kav.PendingLink.openTrip) {
+        if (!uk.noammm.kav.PendingLink.openTrip) return@LaunchedEffect
+        uk.noammm.kav.PendingLink.openTrip = false
+        val journey = model.activeJourney ?: return@LaunchedEffect
+        if (open?.trip === journey.trip) return@LaunchedEffect
+        picking = null; autoOpen = null; linkTrip = null
+        open = OpenTrip(journey.trip, journey.resolved, journey.fromLabel, journey.toLabel, resume = true)
+    }
+
     // Accepted faster route: replace the running trip and keep navigating.
     LaunchedEffect(uk.noammm.kav.Reroute.switchTo) {
         val o = uk.noammm.kav.Reroute.switchTo ?: return@LaunchedEffect

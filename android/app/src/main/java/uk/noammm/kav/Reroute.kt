@@ -241,7 +241,8 @@ object Reroute {
         if (fresh) nm.cancel(NOTIFY_ID)
         notifiedSig = o.sig
         val open = PendingIntent.getActivity(
-            ctx, 4712, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            ctx, 4712, Intent(ctx, MainActivity::class.java).setAction(PendingLink.ACTION_OPEN_TRIP)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val switch = PendingIntent.getActivity(

@@ -106,6 +106,9 @@ object Pip {
 
 object PendingLink {
     var plan by mutableStateOf<MoovitLink.Plan?>(null)
+    const val ACTION_OPEN_TRIP = "uk.noammm.kav.OPEN_TRIP"
+    /** Tapped the trip notification: go straight to the running trip. */
+    var openTrip by mutableStateOf(false)
     /** Saved-place id to set, from tapping an unset place on the widget. */
     var favourite by mutableStateOf<String?>(null)
 }
@@ -142,6 +145,7 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra(PlacesWidget.EXTRA_SET)?.let { PendingLink.favourite = it }
         Reroute.load(this)
         if (intent?.action == Reroute.ACTION_SWITCH) Reroute.accept(this)
+        if (intent?.action == PendingLink.ACTION_OPEN_TRIP) PendingLink.openTrip = true
         setContent {
             val light = K.light
             val view = androidx.compose.ui.platform.LocalView.current
@@ -178,6 +182,7 @@ class MainActivity : ComponentActivity() {
         MoovitLink.parse(intent.dataString)?.let { PendingLink.plan = it }
         intent.getStringExtra(PlacesWidget.EXTRA_SET)?.let { PendingLink.favourite = it }
         if (intent.action == Reroute.ACTION_SWITCH) Reroute.accept(this)
+        if (intent.action == PendingLink.ACTION_OPEN_TRIP) PendingLink.openTrip = true
     }
 }
 
@@ -464,6 +469,9 @@ private fun Shell(model: KavModel) {
         if (model.activeJourney == null || !Reroute.enabled) { Reroute.clear(ctx); return@LaunchedEffect }
         Reroute.clear(ctx)
         Reroute.run(ctx, model)
+    }
+    LaunchedEffect(PendingLink.openTrip) {
+        if (PendingLink.openTrip && model.activeJourney != null) { model.settingsOpen = false; model.tab = Tab.Directions }
     }
     LaunchedEffect(Reroute.switchTo) {
         if (Reroute.switchTo != null) { model.settingsOpen = false; model.tab = Tab.Directions }
