@@ -43,6 +43,7 @@ jobs:
             curl -sSL -o /tmp/upstream.apk "$url"
             unzip -p /tmp/upstream.apk assets/il.kav > android/app/src/main/assets/il.kav
           fi
+          rm -f android/app/src/main/assets/il.kav.gz
           ls -l android/app/src/main/assets/il.kav
           test -s android/app/src/main/assets/il.kav
 
