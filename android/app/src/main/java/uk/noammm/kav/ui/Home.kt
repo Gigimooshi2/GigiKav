@@ -144,14 +144,17 @@ internal fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(K.gap3),
                         ) {
                             HomeShortcut(T("Found a bug?", "מצאתם באג?"), { drawBug() }, Modifier.weight(1f).fillMaxHeight()) {
-                                openLink(ctx, "$REPO_URL/issues/new?labels=bug&title=bug%3A%20")
+                                openLink(ctx, whatsApp(ctx, "Bug in GigiKav"))
                             }
                             HomeShortcut(T("Request a feature?", "רוצים פיצ'ר חדש?"), { drawBulb() }, Modifier.weight(1f).fillMaxHeight()) {
-                                openLink(ctx, "$REPO_URL/issues/new?labels=enhancement&title=feature%3A%20")
+                                openLink(ctx, whatsApp(ctx, "Feature request for GigiKav"))
                             }
                         }
-                        HomeShortcut(T("Buy me a coffee", "קנו לי קפה"), { drawCoffee() }, Modifier.fillMaxWidth()) {
+                        HomeShortcut(T("Buy Noam a coffee (original creator)", "קנו לנועם קפה (היוצר המקורי)"), { drawCoffee() }, Modifier.fillMaxWidth()) {
                             openLink(ctx, COFFEE_URL)
+                        }
+                        HomeShortcut(T("Buy Nadav a coffee (modder)", "קנו לנדב קפה (יוצר המוד)"), { drawCoffee() }, Modifier.fillMaxWidth()) {
+                            openLink(ctx, MODDER_COFFEE_URL)
                         }
                     }
                 }
@@ -341,4 +344,14 @@ private fun DrawScope.drawCoffee() {
     for (x in listOf(.30f, .50f)) {
         drawLine(K.accent, Offset(w * mirrorX(x), w * .14f), Offset(w * mirrorX(x), w * .30f), w * .08f, StrokeCap.Round)
     }
+}
+
+
+private const val MODDER_WHATSAPP = "972534240622"
+private const val MODDER_COFFEE_URL = "https://www.bitpay.co.il/app/share-info?i=-Hitlsz_&j=true"
+
+/** WhatsApp chat with the modder, pre-filled with the app version. */
+private fun whatsApp(ctx: android.content.Context, subject: String): String {
+    val text = "$subject (${uk.noammm.kav.data.Updates.installedVersion(ctx)}): "
+    return "https://wa.me/$MODDER_WHATSAPP?text=" + java.net.URLEncoder.encode(text, "UTF-8").replace("+", "%20")
 }
