@@ -119,6 +119,19 @@
                 android:value="ongoing transit trip status" />
         </service>
 
+        <!-- home-screen widget: saved places, one tap to directions -->
+        <receiver
+            android:name=".PlacesWidget"
+            android:exported="false"
+            android:label="Kav places">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_places_info" />
+        </receiver>
+
         <!-- the downloaded update, readable by the installer and nobody else -->
         <provider
             android:name="androidx.core.content.FileProvider"

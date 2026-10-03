@@ -1178,5 +1178,6 @@ object Prefs {
             )
         }
         store(ctx).edit().putString("favourites", arr.toString()).apply()
+        PlacesWidget.refresh(ctx)
     }
 }
