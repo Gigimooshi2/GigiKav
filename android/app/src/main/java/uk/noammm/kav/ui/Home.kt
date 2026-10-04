@@ -267,7 +267,7 @@ private fun JourneyCard(model: KavModel, journey: ActiveJourney, onResume: () ->
     }
 }
 
-internal fun stepInstruction(step: Step, journey: ActiveJourney, lastLeg: Boolean, now: Long): Pair<String, String> {
+internal fun stepInstruction(step: Step, journey: ActiveJourney, lastLeg: Boolean, now: Long, fix: Fix? = null): Pair<String, String> {
     val r = journey.resolved
     fun time(utc: Long) = SimpleDateFormat("HH:mm", Locale.US).format(Date(utc * 1000))
     fun stop(id: Int) = r.stopName(id)?.takeIf { it.isNotBlank() }
@@ -279,10 +279,13 @@ internal fun stepInstruction(step: Step, journey: ActiveJourney, lastLeg: Boolea
     fun nextStop(id: Int) = stop(id) ?: if (lastLeg) journey.toLabel else T("your next stop", "התחנה הבאה שלכם")
     return when (step) {
         is Step.Start -> T("Leave at ${time(step.time)}", "יציאה בשעה ${time(step.time)}") to T("Start from ${step.label}", "התחלה מ${step.label}")
-        is Step.Walk -> T("Walk to ${nextStop(step.toStop)}", "הליכה אל ${nextStop(step.toStop)}") to listOfNotNull(
-            T("${step.leg.minutes} min", "${step.leg.minutes} דק׳").takeIf { step.leg.minutes > 0 },
-            distanceLabel(step.leg.meters.toDouble()).takeIf { step.leg.meters > 0 },
-        ).joinToString(" · ").ifBlank { T("Follow the walking route.", "עקבו אחרי מסלול ההליכה.") }
+        is Step.Walk -> {
+            val (m, min) = walkLeft(step.leg, fix, now)
+            T("Walk to ${nextStop(step.toStop)}", "הליכה אל ${nextStop(step.toStop)}") to listOfNotNull(
+                T("$min min", "$min דק׳").takeIf { min > 0 },
+                distanceLabel(m.toDouble()).takeIf { m > 0 },
+            ).joinToString(" · ").ifBlank { T("Follow the walking route.", "עקבו אחרי מסלול ההליכה.") }
+        }
         is Step.Wait -> {
             val (ride, wait) = boardingChoice(step.ride, step.wait, journey.chosen[step.legIndex] ?: 0)
             val departure = r.departures(ride, wait).firstOrNull { it.tripId == ride.tripId }

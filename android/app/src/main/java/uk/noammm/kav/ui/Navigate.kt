@@ -363,10 +363,12 @@ internal fun StepCard(
 
         is Step.Walk -> {
             val stop = r.stop(step.toStop)
+            // While this is the step you're on, count down from where you actually are.
+            val (leftM, leftMin) = if (active) walkLeft(step.leg, fix, now) else step.leg.meters to step.leg.minutes
             Card(
-                T("Walk ${step.leg.minutes} min to", "הליכה ${step.leg.minutes} דק׳ אל").takeIf { step.leg.minutes >= 1 } ?: T("Walk to", "הליכה אל"),
+                T("Walk $leftMin min to", "הליכה $leftMin דק׳ אל").takeIf { leftMin >= 1 } ?: T("Walk to", "הליכה אל"),
                 active,
-                trailing = if (step.leg.meters > 0) distanceLabel(step.leg.meters.toDouble()) else null,
+                trailing = if (leftM > 0) distanceLabel(leftM.toDouble()) else null,
             ) {
                 StopLine(
                     stop?.name ?: T("your stop", "התחנה שלכם"), stop?.code,

@@ -266,3 +266,20 @@ internal fun stopsProgress(
     }
     return -1f
 }
+
+
+/**
+ * What's left of a walk leg: (metres, minutes). Follows the GPS fix along the walking path when
+ * it's fresh and on (or near) the route; otherwise the planned figures.
+ */
+internal fun walkLeft(leg: Moovit.Leg, fix: Fix?, now: Long): Pair<Int, Int> {
+    val path = leg.shape
+    val len = pathLength(path)
+    val total = if (leg.meters > 0) leg.meters.toDouble() else len
+    val pace = if (leg.minutes > 0 && total > 0) total / leg.minutes else 80.0   // m per minute
+    val f = fix?.takeIf { it.isFresh(now) }
+    val left = if (f != null && path.size >= 2 && len > 1 && distanceToPath(f.lat, f.lon, path) < 150) {
+        (len - alongPath(f.lat, f.lon, path)).coerceAtLeast(0.0) * (total / len)
+    } else total
+    return Math.round(left).toInt() to kotlin.math.ceil(left / pace).toInt()
+}
