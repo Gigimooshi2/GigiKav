@@ -62,10 +62,23 @@ fun PipOverlay(model: KavModel) {
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Text(
-                    title, fontSize = 15.sp, lineHeight = 19.sp, color = K.text, fontWeight = FontWeight.SemiBold,
-                    maxLines = if (cells.isEmpty()) 2 else 1, overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        title, fontSize = 15.sp, lineHeight = 19.sp, color = K.text, fontWeight = FontWeight.SemiBold,
+                        maxLines = if (cells.isEmpty()) 2 else 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    val (arrive, liveArrive) = pipArrival(steps, index, journey, model.fix, now)
+                    Spacer(Modifier.width(K.gap2))
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(T("Arrive", "הגעה"), fontSize = 10.sp, lineHeight = 12.sp, color = K.dim)
+                        Text(
+                            SimpleDateFormat("HH:mm", Locale.US).format(Date(arrive * 1000)),
+                            fontSize = 14.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold,
+                            color = if (liveArrive) K.live else K.text,
+                        )
+                    }
+                }
                 if (showDetail && waitLive && detail.contains(" · ")) {
                     val pulse by rememberInfiniteTransition(label = "pipLive").animateFloat(
                         .55f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "pipPulse",
@@ -158,4 +171,30 @@ private fun pipCells(steps: List<Step>, index: Int, journey: ActiveJourney, fix:
         )
     }
     return out
+}
+
+
+/**
+ * Final arrival, nudged by what's known live: on a bus, the GPS-estimated get-off time; before
+ * boarding, how late (or early) the next bus is running. Returns (time, adjusted-live).
+ */
+private fun pipArrival(steps: List<Step>, index: Int, journey: ActiveJourney, fix: Fix?, now: Long): Pair<Long, Boolean> {
+    val planned = journey.trip.arr
+    val step = steps.getOrNull(index) ?: return planned to false
+    val r = journey.resolved
+    if (step is Step.Ride) {
+        val ride = boardingChoice(step.ride, step.wait, journey.chosen[step.legIndex] ?: 0).first
+        val f = fix?.takeIf { it.isFresh(now) && it.aboard(ride.shape) } ?: return planned to false
+        val len = pathLength(ride.shape)
+        if (len <= 0 || ride.arr <= ride.dep) return planned to false
+        val left = 1.0 - (alongPath(f.lat, f.lon, ride.shape) / len).coerceIn(0.0, 1.0)
+        val eta = now + (left * (ride.arr - ride.dep)).toLong()
+        return planned + (eta - ride.arr).coerceAtLeast(-120) to true
+    }
+    val next = (index until steps.size).firstOrNull { steps[it] is Step.Wait } ?: return planned to false
+    val w = steps[next] as Step.Wait
+    val (ride, wait) = boardingChoice(w.ride, w.wait, journey.chosen[w.legIndex] ?: 0)
+    val dep = r.departures(ride, wait).firstOrNull { it.tripId == ride.tripId }?.takeIf { it.live }
+        ?: return planned to false
+    return planned + (dep.timeUtc - ride.dep).coerceAtLeast(-120) to true
 }
