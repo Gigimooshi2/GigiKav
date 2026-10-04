@@ -123,6 +123,14 @@ fun DirectionsOnline(model: KavModel) {
     LaunchedEffect(showResults, fromPlace == null, here == null) {
         hereOrigin = if (showResults && fromPlace == null) hereOrigin ?: here else null
     }
+    // Moved for real (not GPS jitter) while results are showing: re-plan from where you are now.
+    LaunchedEffect(here) {
+        val o = hereOrigin
+        val h = here
+        if (o != null && h != null && showResults && fromPlace == null && open == null &&
+            metres(o.first, o.second, h.first, h.second) > 200
+        ) hereOrigin = h
+    }
     val fromLL = fromPlace?.let { it.lat to it.lon } ?: hereOrigin ?: here
     val toLL = toPlace?.let { it.lat to it.lon }
     val fromIsHere = if (fromPlace == null) here != null else isHere(fromPlace)
@@ -436,8 +444,11 @@ fun DirectionsOnline(model: KavModel) {
                     onTo = { picking = "to" },
                     onSwap = {
                         val a = fromPlace
-                        fromPlace = toPlace
-                        toPlace = a ?: here?.let(::herePlace)
+                        val b = toPlace
+                        // "Current location" always means where you are now, not where it was when picked.
+                        fromPlace = if (b != null && isHere(b)) null else b
+                        toPlace = if (a == null || isHere(a)) here?.let(::herePlace) else a
+                        hereOrigin = here
                     },
                     onBack = { showResults = false },
                 )

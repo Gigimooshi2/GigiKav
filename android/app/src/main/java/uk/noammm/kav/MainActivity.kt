@@ -371,7 +371,8 @@ private fun Shell(model: KavModel) {
     val shellLifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(shellLifecycle) {
         shellLifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            if (model.here == null && hasLocationPermission(ctx)) {
+            // Every return to the app: refresh where you are, so "Current location" is now, not then.
+            if (hasLocationPermission(ctx)) {
                 requestLocationOnce(ctx) { model.locate(it.first, it.second) }
             }
         }
