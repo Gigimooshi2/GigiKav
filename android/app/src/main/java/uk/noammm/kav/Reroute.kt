@@ -183,6 +183,8 @@ object Reroute {
         fun same(it: Moovit.Itinerary) = it.rides.size == remaining.size &&
             it.rides.zip(remaining).all { (leg, want) -> leg.lineChoices.any { c -> c in want } }
         val baseline = list.filter(::same).minOfOrNull { it.arr } ?: j.trip.arr
+        val modes = j.trip.legs.map { it.kind }.toSet() + Moovit.LegKind.WALK + Moovit.LegKind.WAIT
+        val needsRide = j.trip.legs.any { it.kind == Moovit.LegKind.RIDE }
         fun catchable(it: Moovit.Itinerary): Boolean {
             val first = it.legs.indexOfFirst { l -> l.kind == Moovit.LegKind.RIDE }
             if (first < 0) return true
@@ -194,6 +196,9 @@ object Reroute {
         val best = list.asSequence()
             .filter { !same(it) && it.arr > 0 && it.arr <= baseline - MIN_GAIN && catchable(it) }
             .filter { it.legs.none { l -> l.kind == Moovit.LegKind.OTHER } || ResultFilter.SHARED in filters }
+            // Stay in the trip's own modes: a bus trip only ever gets bus (and walking) alternatives,
+            // never a bike, taxi or scooter, and never a walk-only route.
+            .filter { c -> c.legs.all { it.kind in modes } && (!needsRide || c.legs.any { it.kind == Moovit.LegKind.RIDE }) }
             .filter { c -> dismissed[sigOf(c)]?.let { c.arr <= it - REOFFER_GAIN } ?: true }
             .minByOrNull { it.arr } ?: return null
 
