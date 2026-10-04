@@ -85,7 +85,10 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
                         "תכנון מסלול עדיין שולח את שתי הנקודות שאתם בוחרים, כי זו הנסיעה שביקשתם למצוא.",
                 ),
                 priv,
-                { on -> priv = on; uk.noammm.kav.Prefs.setPrivateSearch(ctx, on); uk.noammm.kav.data.Moovit.shareLocation = !on },
+                { on ->
+                    priv = on; uk.noammm.kav.Prefs.setPrivateSearch(ctx, on); uk.noammm.kav.data.Moovit.shareLocation = !on
+                    Online.reset()
+                },
             ) { ShieldGlyph(if (priv) K.text else K.dim, 18.dp) }
         }
 

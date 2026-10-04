@@ -58,22 +58,97 @@ object Online {
     @Volatile var session: MoovitSession? = null
     private val opening = kotlinx.coroutines.sync.Mutex()
     private var failedAt = 0L
+    private var failures = 0
+    @Volatile private var generation = 0
+    private var store: android.content.SharedPreferences? = null
+    private var born = 0L
+    private var rotate = false
+    @Volatile private var asked = false
+    private const val WEEK_MS = 7 * 86_400_000L
+
+    fun init(ctx: android.content.Context) {
+        val s = ctx.getSharedPreferences("moovit-session", android.content.Context.MODE_PRIVATE)
+        store = s
+        born = s.getLong("born", 0L)
+        rotate = s.getBoolean("rotate", false)
+        session = s.getString("user", null)?.let { user ->
+            MoovitSession(
+                user, s.getString("access", null).orEmpty(), s.getString("refresh", null).orEmpty(),
+                s.getInt("metro", 1), s.getLong("expires", 0L),
+            )
+        }
+    }
+
+    // After a change to what Moovit may be told: the next call starts a new user, and a registration
+    // already under way is not kept.
+    fun reset() {
+        generation++
+        rotate = true
+        asked = true
+        store?.edit()?.putBoolean("rotate", true)?.apply()
+    }
+
+    // Renewed a minute before it expires.
+    private fun fresh(s: MoovitSession?) = s != null && s.accessExpiresUtc - System.currentTimeMillis() / 1000 > 60
 
     // One Moovit session for the whole app. Callers that arrive together share it, or its failure.
-    suspend fun open(at: Pair<Double, Double>? = null): MoovitSession = session ?: opening.withLock {
-        session ?: run {
-            if (System.currentTimeMillis() - failedAt < 10_000) throw java.io.IOException("Moovit is unreachable")
+    suspend fun open(at: Pair<Double, Double>? = null): MoovitSession = session.takeIf { fresh(it) && !asked } ?: opening.withLock {
+        session.takeIf { fresh(it) && !asked } ?: run {
+            // Each failure waits twice as long, up to five minutes: Moovit refuses new sessions from
+            // an address that keeps asking.
+            val wait = 10_000L shl (failures - 1).coerceIn(0, 5)
+            if (failures > 0 && System.currentTimeMillis() - failedAt < minOf(wait, 300_000L)) {
+                throw java.io.IOException("Moovit is unreachable")
+            }
             try {
-                withContext(Dispatchers.IO) {
-                    if (at == null) Moovit.register() else Moovit.register(at.first, at.second)
-                }.also { session = it }
+                val gen = generation
+                withContext(Dispatchers.IO) { obtain(at) }.also {
+                    if (gen == generation) {
+                        if (it.userKey != session?.userKey) { born = System.currentTimeMillis(); rotate = false }
+                        keep(it)
+                    }
+                    failures = 0
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 failedAt = System.currentTimeMillis()
+                failures++
                 throw e
             }
         }
+    }
+
+    // Moovit's CDN has started refusing requests for a new user more than once, so a user is kept and
+    // its access renewed each day. A new one is made weekly or when asked for, and while that fails
+    // the old one carries on, trying again at the next renewal.
+    private fun obtain(at: Pair<Double, Double>?): MoovitSession {
+        asked = false
+        val kept = session
+        val due = kept == null || rotate || System.currentTimeMillis() - born > WEEK_MS
+        if (due) {
+            try {
+                return if (at == null) Moovit.register() else Moovit.register(at.first, at.second)
+            } catch (e: Exception) {
+                if (kept == null) throw e
+            }
+        }
+        if (fresh(kept)) return kept!!
+        return try {
+            Moovit.renew(kept!!)
+        } catch (e: Exception) {
+            if (due) throw e
+            if (at == null) Moovit.register() else Moovit.register(at.first, at.second)
+        }
+    }
+
+    private fun keep(s: MoovitSession) {
+        session = s
+        store?.edit()
+            ?.putString("user", s.userKey)?.putString("access", s.accessToken)?.putString("refresh", s.refreshToken)
+            ?.putInt("metro", s.metroId)?.putLong("expires", s.accessExpiresUtc)
+            ?.putLong("born", born)?.putBoolean("rotate", rotate)
+            ?.apply()
     }
 }
 

@@ -41,14 +41,16 @@ object Moovit {
 
     private fun post(
         base: String, path: String, body: ByteArray, headers: Map<String, String>, readMs: Int = 25000,
+        revision: Boolean = true,
     ): Pair<Int, ByteArray> {
         repeat(2) { attempt ->
             val c = (URL(base + path).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"; doOutput = true; connectTimeout = 20000; readTimeout = readMs
-                for ((k, v) in withRev(headers)) setRequestProperty(k, v)
+                for ((k, v) in if (revision) withRev(headers) else headers) setRequestProperty(k, v)
             }
             c.outputStream.use { it.write(body) }
             val code = c.responseCode
+            if (!revision) c.getHeaderField(REV_HEADER)?.trim()?.takeIf { it.isNotEmpty() }?.let { metroRev = it }
             val raw = (if (code in 200..299) c.inputStream else c.errorStream)?.use { s ->
                 val bytes = s.readBytes()
                 if (c.contentEncoding == "gzip") GZIPInputStream(bytes.inputStream()).readBytes() else bytes
@@ -82,26 +84,43 @@ object Moovit {
         stop()
     }.bytes()
 
-    fun register(lat: Double = NEUTRAL.first, lon: Double = NEUTRAL.second): MoovitSession {
-        val (la, lo) = if (shareLocation) lat to lon else NEUTRAL
-        val h = mapOf(
-            "Content-Type" to "application/octet", "Accept" to "application/json",
-            "Accept-Encoding" to "gzip", "User-Agent" to "ktor-client",
-            "api_key" to APP_ID, "client_version" to CLIENT_VERSION, "phone_type" to "2",
-        )
-        val (code, raw) = post(APP4, "UserAuth/CreateUser", createUserBody(la, lo), h)
-        if (code != 200) throw RuntimeException("CreateUser HTTP $code")
-        val rec = JSONObject(String(raw, Charsets.UTF_8)).getJSONObject("1").getJSONObject("rec")
-        val tokens = rec.getJSONObject("7").getJSONObject("rec").getJSONObject("1").getJSONObject("rec")
+    private val userHeaders = mapOf(
+        "Content-Type" to "application/octet", "Accept" to "application/json",
+        "Accept-Encoding" to "gzip", "User-Agent" to "Dalvik/2.1.0",
+        "api_key" to APP_ID, "client_version" to CLIENT_VERSION, "phone_type" to "2",
+    )
+
+    private fun sessionOf(userKey: String, metroId: Int, tokens: JSONObject): MoovitSession {
         val access = tokens.getJSONObject("1").getJSONObject("rec")
         val refresh = tokens.getJSONObject("2").getJSONObject("rec")
         return MoovitSession(
-            userKey = rec.getJSONObject("1").getString("str"),
+            userKey = userKey,
             accessToken = access.getJSONObject("3").getString("str"),
             accessExpiresUtc = access.getJSONObject("2").getLong("i64") / 1000,
             refreshToken = refresh.getJSONObject("3").getString("str"),
-            metroId = rec.getJSONObject("3").getInt("i16"),
+            metroId = metroId,
         )
+    }
+
+    // From upstream Kav 2.1: Moovit's CDN refuses a new user asked for with a revision header, or by
+    // "ktor-client"; the answer names the current revision.
+    fun register(lat: Double = NEUTRAL.first, lon: Double = NEUTRAL.second): MoovitSession {
+        val (la, lo) = if (shareLocation) lat to lon else NEUTRAL
+        val (code, raw) = post(APP4, "UserAuth/CreateUser", createUserBody(la, lo), userHeaders, revision = false)
+        if (code != 200) throw RuntimeException("CreateUser HTTP $code")
+        val rec = JSONObject(String(raw, Charsets.UTF_8)).getJSONObject("1").getJSONObject("rec")
+        return sessionOf(
+            rec.getJSONObject("1").getString("str"), rec.getJSONObject("3").getInt("i16"),
+            rec.getJSONObject("7").getJSONObject("rec").getJSONObject("1").getJSONObject("rec"),
+        )
+    }
+
+    // From upstream Kav 2.1.1: another day of access for the same user. The refresh token lasts years.
+    fun renew(s: MoovitSession): MoovitSession {
+        val body = TWriter().apply { strField(1, s.refreshToken); stop() }.bytes()
+        val (code, raw) = post(APP4, "UserAuth/RefreshTokens", body, userHeaders, revision = false)
+        if (code != 200) throw RuntimeException("RefreshTokens HTTP $code")
+        return sessionOf(s.userKey, s.metroId, JSONObject(String(raw, Charsets.UTF_8)).getJSONObject("1").getJSONObject("rec"))
     }
 
     private fun authHeaders(s: MoovitSession) = mapOf(
