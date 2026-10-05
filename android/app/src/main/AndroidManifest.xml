@@ -8,6 +8,8 @@
          search ranks the wrong city first. Read once per session, never stored. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Only asked for by the trip widget, and only if its start is "where I am". -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
     <!-- Routing goes through Moovit's own servers, so planning a trip needs a
          connection. The map is the part that does not: its tiles are bundled and
@@ -124,6 +126,25 @@
 
         <!-- "Ignore" on a faster-route notification -->
         <receiver android:name=".RerouteReceiver" android:exported="false" />
+
+        <!-- trip widget: bus options to a set destination -->
+        <receiver android:name=".TripWidget" android:exported="false" android:label="Kav trip">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_trip_info" />
+        </receiver>
+        <receiver android:name=".TripWidgetRefresh" android:exported="false" />
+        <activity
+            android:name=".TripWidgetConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="uk.noammm.kav.tripwidget"
+            android:theme="@style/Theme.Kav">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
 
         <!-- picks which saved places a widget shows -->
         <activity

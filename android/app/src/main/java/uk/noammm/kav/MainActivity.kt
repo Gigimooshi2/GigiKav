@@ -128,7 +128,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         AutoUpdate.visible = false
-        if (!isChangingConfigurations) AutoUpdate.soon(this)
+        if (!isChangingConfigurations) { AutoUpdate.soon(this); TripWidget.refreshAll(this) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -153,6 +153,7 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra(PlacesWidget.EXTRA_SET)?.let { PendingLink.favourite = it }
         Reroute.load(this)
         Online.init(this)
+        TripWidget.init(this)
         AutoUpdate.schedule(this)
         if (intent?.action == Reroute.ACTION_SWITCH) Reroute.accept(this)
         if (intent?.action == PendingLink.ACTION_OPEN_TRIP) PendingLink.openTrip = true
@@ -271,6 +272,7 @@ class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
 
     fun locate(lat: Double, lon: Double, speed: Float = 0f) {
         here = lat to lon
+        TripWidget.noteHere(lat, lon)
         fix = Fix(lat, lon, System.currentTimeMillis() / 1000, speed)
     }
 
