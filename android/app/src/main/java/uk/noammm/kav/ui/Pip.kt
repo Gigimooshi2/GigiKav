@@ -44,11 +44,14 @@ fun PipOverlay(model: KavModel) {
         }
         val index = model.journeyStep.coerceIn(0, steps.lastIndex)
         val (title, detail) = stepInstruction(steps[index], journey, index == steps.lastIndex - 1, now, model.fix)
-        // Waiting on a live bus: its time glows, like live times in the app.
-        val waitLive = (steps[index] as? Step.Wait)?.let { w ->
+        // Waiting: the time takes the same colour as in the app (live, weak, off route…); live ones glow.
+        val waitDep = (steps[index] as? Step.Wait)?.let { w ->
             val (ride, wait) = boardingChoice(w.ride, w.wait, journey.chosen[w.legIndex] ?: 0)
-            journey.resolved.departures(ride, wait).firstOrNull { it.tripId == ride.tripId }?.live == true
-        } ?: false
+            journey.resolved.departures(ride, wait).firstOrNull { it.tripId == ride.tripId }
+        }
+        val waitTint = waitDep?.takeIf { it.state != Moovit.TimeState.STATIC && it.state != Moovit.TimeState.STATISTICAL }
+            ?.let { depColour(it) }
+        val waitLive = waitDep?.live == true
         val cells = pipCells(steps, index, journey, model.fix, now)
         val showDetail = cells.isEmpty() || steps[index] !is Step.Walk
         Row(Modifier.fillMaxSize().padding(horizontal = K.gap3, vertical = K.gap2), verticalAlignment = Alignment.CenterVertically) {
@@ -79,15 +82,16 @@ fun PipOverlay(model: KavModel) {
                         )
                     }
                 }
-                if (showDetail && waitLive && detail.contains(" · ")) {
+                if (showDetail && waitTint != null && detail.contains(" · ")) {
                     val pulse by rememberInfiniteTransition(label = "pipLive").animateFloat(
-                        .55f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "pipPulse",
+                        if (waitLive) .55f else 1f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "pipPulse",
                     )
-                    val cut = detail.lastIndexOf(" · ") + 3
+                    // Colour the state word and the time: "Off route · in 2 min".
+                    val cut = detail.lastIndexOf(" · ", detail.lastIndexOf(" · ") - 1).let { if (it >= 0) it + 3 else detail.lastIndexOf(" · ") + 3 }
                     Text(
                         buildAnnotatedString {
                             append(detail.substring(0, cut))
-                            withStyle(SpanStyle(color = K.live.copy(alpha = pulse), fontWeight = FontWeight.SemiBold)) {
+                            withStyle(SpanStyle(color = waitTint.copy(alpha = pulse), fontWeight = FontWeight.SemiBold)) {
                                 append(detail.substring(cut))
                             }
                         },
@@ -106,7 +110,7 @@ fun PipOverlay(model: KavModel) {
                         Text(c.label, fontSize = 10.sp, lineHeight = 12.sp, color = K.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             c.value, fontSize = 14.sp, lineHeight = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            color = if (c.live) K.live else K.text, fontWeight = FontWeight.SemiBold,
+                            color = c.tint ?: K.text, fontWeight = FontWeight.SemiBold,
                         )
                     }
                 }
@@ -115,7 +119,10 @@ fun PipOverlay(model: KavModel) {
     }
 }
 
-private class PipCell(val label: String, val value: String, val live: Boolean = false)
+private class PipCell(val label: String, val value: String, val tint: androidx.compose.ui.graphics.Color? = null)
+
+private fun depTintOrNull(d: Moovit.Departure) =
+    if (d.state == Moovit.TimeState.STATIC || d.state == Moovit.TimeState.STATISTICAL) null else depColour(d)
 
 private fun pipCells(steps: List<Step>, index: Int, journey: ActiveJourney, fix: Fix?, now: Long): List<PipCell> {
     val r = journey.resolved
@@ -162,7 +169,7 @@ private fun pipCells(steps: List<Step>, index: Int, journey: ActiveJourney, fix:
             ?: Moovit.Departure(ride.tripId, ride.dep)
         out.add(
             if (dep.status == 3) PipCell(line(ride), T("cancelled", "מבוטל"))
-            else PipCell(line(ride) + " " + T("arrives", "מגיע"), until(dep.timeUtc), live = dep.live)
+            else PipCell(line(ride) + " " + T("arrives", "מגיע"), until(dep.timeUtc), tint = depTintOrNull(dep))
         )
     }
     return out

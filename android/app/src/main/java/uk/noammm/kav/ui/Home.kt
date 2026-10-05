@@ -293,7 +293,7 @@ internal fun stepInstruction(step: Step, journey: ActiveJourney, lastLeg: Boolea
             if (departure.status == 3) T("${line(ride)} is cancelled", "${line(ride)} מבוטל") to T("Find another route before continuing.", "מצאו מסלול אחר לפני שתמשיכו.")
             else T("Wait for ${line(ride)}", "המתנה ל${line(ride)}") to listOfNotNull(
                 stop(ride.fromStop),
-                (if (departure.live) T("Live · ", "בזמן אמת · ") else T("Scheduled · ", "מתוזמן · ")) + whenLabel(departure.timeUtc, now),
+                depStateLabel(departure) + " · " + whenLabel(departure.timeUtc, now),
             ).joinToString(" · ")
         }
         is Step.Ride -> {

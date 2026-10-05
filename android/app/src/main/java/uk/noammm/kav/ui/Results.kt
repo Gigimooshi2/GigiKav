@@ -641,3 +641,14 @@ internal fun GlobeGlyph(
         drawLine(cut, Offset(w * .10f, w * .64f), Offset(w * .90f, w * .64f), sw)
     }
 }
+
+
+/** Words for a departure's state, matching the colours and marks in the app. */
+fun depStateLabel(d: Moovit.Departure): String = when {
+    d.state == Moovit.TimeState.OUT_OF_SHAPE -> T("Off route", "מחוץ למסלול")
+    d.state == Moovit.TimeState.REAL_TIME_DROPPED -> T("Live lost", "זמן אמת אבד")
+    d.delayed -> T("Delayed", "מתעכב")
+    d.state == Moovit.TimeState.REAL_TIME_LOW -> T("Live (weak)", "בזמן אמת (חלש)")
+    d.live -> T("Live", "בזמן אמת")
+    else -> T("Scheduled", "מתוזמן")
+}
