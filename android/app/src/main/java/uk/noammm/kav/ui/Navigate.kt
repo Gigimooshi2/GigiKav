@@ -225,7 +225,8 @@ fun NavigateScreen(
                     }
                     Column(Modifier.weight(1f)) {
                         Text(T("Your trip", "הנסיעה שלכם"), fontSize = 17.sp, color = K.text, fontWeight = FontWeight.SemiBold)
-                        Text("${dur((trip.arr - now).toInt().coerceAtLeast(0))} · ${hm.format(Date(trip.arr * 1000))}",
+                        val arrive = journey?.let { liveArrival(steps, model.journeyStep.coerceIn(0, steps.lastIndex), it, model.fix, now).first } ?: trip.arr
+                        Text("${dur((arrive - now).toInt().coerceAtLeast(0))} · ${hm.format(Date(arrive * 1000))}",
                             fontSize = 12.sp, color = K.muted, maxLines = 1)
                     }
                     RerouteToggle(glass = false)
@@ -439,10 +440,18 @@ internal fun StepCard(
             val names = r.stops + rememberStopNames(stops)
             val alight = r.stop(ride.toStop) ?: names[ride.toStop]
             val arrival = r.arrival(ride)
+            // While you're on it, what's left: same estimate as the popup (GPS along the route, else the clock).
+            val progress = if (active) stopsProgress(ride, names, arrival, fix, now) else -1f
+            val aboard = active && fix?.let { it.isFresh(now) && it.aboard(ride.shape) } == true
+            val stopsLeft = if (aboard && progress >= 1f) (stops.size - progress.toInt()).coerceAtLeast(0) else stops.size - 1
+            val minLeft = if (!active) ride.minutes else {
+                val eta = rideEta(ride, fix, now) ?: if (now >= ride.dep) ride.arr else null
+                eta?.let { ((it - now + 59) / 60).toInt().coerceAtLeast(0) } ?: ride.minutes
+            }
             Card(
-                T("Ride ${stops.size - 1} stops to", "נסיעה ${stops.size - 1} תחנות אל").takeIf { stops.size > 1 } ?: T("Ride to", "נסיעה אל"),
+                T("Ride $stopsLeft stops to", "נסיעה $stopsLeft תחנות אל").takeIf { stopsLeft > 0 } ?: T("Ride to", "נסיעה אל"),
                 active,
-                trailing = T("${ride.minutes} min", "${ride.minutes} דק׳"),
+                trailing = T("$minLeft min", "$minLeft דק׳"),
             ) {
                 LineRow(ride, r)
                 Spacer(Modifier.height(K.gap2))

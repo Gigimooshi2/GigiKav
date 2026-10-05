@@ -68,7 +68,7 @@ fun PipOverlay(model: KavModel) {
                         maxLines = if (cells.isEmpty()) 2 else 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    val (arrive, liveArrive) = pipArrival(steps, index, journey, model.fix, now)
+                    val (arrive, liveArrive) = liveArrival(steps, index, journey, model.fix, now)
                     Spacer(Modifier.width(K.gap2))
                     Column(horizontalAlignment = Alignment.End) {
                         Text(T("Arrive", "הגעה"), fontSize = 10.sp, lineHeight = 12.sp, color = K.dim)
@@ -138,13 +138,8 @@ private fun pipCells(steps: List<Step>, index: Int, journey: ActiveJourney, fix:
     // On a ride: when do I get off (GPS-estimated if aboard, else timetable)
     if (step is Step.Ride) {
         val ride = boardingChoice(step.ride, step.wait, journey.chosen[step.legIndex] ?: 0).first
-        val f = fix?.takeIf { it.isFresh(now) && it.aboard(ride.shape) }
-        val len = if (f != null) pathLength(ride.shape) else 0.0
-        val eta = if (f != null && len > 0 && ride.arr > ride.dep) {
-            val left = 1.0 - (alongPath(f.lat, f.lon, ride.shape) / len).coerceIn(0.0, 1.0)
-            now + (left * (ride.arr - ride.dep)).toLong()
-        } else ride.arr
-        out.add(PipCell(T("Get off", "ירידה"), (if (f == null) "~" else "") + until(eta)))
+        val gps = rideEta(ride, fix, now)
+        out.add(PipCell(T("Get off", "ירידה"), (if (gps == null) "~" else "") + until(gps ?: ride.arr)))
     }
 
     // Next boarding after this step (or after the Start/Walk that leads to it)
@@ -174,27 +169,3 @@ private fun pipCells(steps: List<Step>, index: Int, journey: ActiveJourney, fix:
 }
 
 
-/**
- * Final arrival, nudged by what's known live: on a bus, the GPS-estimated get-off time; before
- * boarding, how late (or early) the next bus is running. Returns (time, adjusted-live).
- */
-private fun pipArrival(steps: List<Step>, index: Int, journey: ActiveJourney, fix: Fix?, now: Long): Pair<Long, Boolean> {
-    val planned = journey.trip.arr
-    val step = steps.getOrNull(index) ?: return planned to false
-    val r = journey.resolved
-    if (step is Step.Ride) {
-        val ride = boardingChoice(step.ride, step.wait, journey.chosen[step.legIndex] ?: 0).first
-        val f = fix?.takeIf { it.isFresh(now) && it.aboard(ride.shape) } ?: return planned to false
-        val len = pathLength(ride.shape)
-        if (len <= 0 || ride.arr <= ride.dep) return planned to false
-        val left = 1.0 - (alongPath(f.lat, f.lon, ride.shape) / len).coerceIn(0.0, 1.0)
-        val eta = now + (left * (ride.arr - ride.dep)).toLong()
-        return planned + (eta - ride.arr).coerceAtLeast(-120) to true
-    }
-    val next = (index until steps.size).firstOrNull { steps[it] is Step.Wait } ?: return planned to false
-    val w = steps[next] as Step.Wait
-    val (ride, wait) = boardingChoice(w.ride, w.wait, journey.chosen[w.legIndex] ?: 0)
-    val dep = r.departures(ride, wait).firstOrNull { it.tripId == ride.tripId }?.takeIf { it.live }
-        ?: return planned to false
-    return planned + (dep.timeUtc - ride.dep).coerceAtLeast(-120) to true
-}

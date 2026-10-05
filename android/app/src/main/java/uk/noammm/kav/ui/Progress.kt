@@ -1,5 +1,6 @@
 package uk.noammm.kav.ui
 
+import uk.noammm.kav.ActiveJourney
 import uk.noammm.kav.data.Moovit
 import kotlin.math.cos
 import kotlin.math.max
@@ -282,4 +283,35 @@ internal fun walkLeft(leg: Moovit.Leg, fix: Fix?, now: Long): Pair<Int, Int> {
         (len - alongPath(f.lat, f.lon, path)).coerceAtLeast(0.0) * (total / len)
     } else total
     return Math.round(left).toInt() to kotlin.math.ceil(left / pace).toInt()
+}
+
+
+/** When you'll reach the stop you get off at, from your GPS position along the bus's route; null if not aboard. */
+internal fun rideEta(ride: Moovit.Leg, fix: Fix?, now: Long): Long? {
+    val f = fix?.takeIf { it.isFresh(now) && it.aboard(ride.shape) } ?: return null
+    val len = pathLength(ride.shape)
+    if (len <= 0 || ride.arr <= ride.dep) return null
+    val left = 1.0 - (alongPath(f.lat, f.lon, ride.shape) / len).coerceIn(0.0, 1.0)
+    return now + (left * (ride.arr - ride.dep)).toLong()
+}
+
+/**
+ * Final arrival, nudged by what's known live: on a bus, the GPS-estimated get-off time; before
+ * boarding, how late (or early) the next bus is running. Returns (time, adjusted-live).
+ */
+internal fun liveArrival(steps: List<Step>, index: Int, journey: ActiveJourney, fix: Fix?, now: Long): Pair<Long, Boolean> {
+    val planned = journey.trip.arr
+    val step = steps.getOrNull(index) ?: return planned to false
+    val r = journey.resolved
+    if (step is Step.Ride) {
+        val ride = boardingChoice(step.ride, step.wait, journey.chosen[step.legIndex] ?: 0).first
+        val eta = rideEta(ride, fix, now) ?: return planned to false
+        return planned + (eta - ride.arr).coerceAtLeast(-120) to true
+    }
+    val next = (index until steps.size).firstOrNull { steps[it] is Step.Wait } ?: return planned to false
+    val w = steps[next] as Step.Wait
+    val (ride, wait) = boardingChoice(w.ride, w.wait, journey.chosen[w.legIndex] ?: 0)
+    val dep = r.departures(ride, wait).firstOrNull { it.tripId == ride.tripId }?.takeIf { it.live }
+        ?: return planned to false
+    return planned + (dep.timeUtc - ride.dep).coerceAtLeast(-120) to true
 }
