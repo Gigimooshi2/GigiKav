@@ -1091,8 +1091,10 @@ object Moovit {
     }
 
     fun refreshLive(s: MoovitSession, list: List<Itinerary>, prev: Resolved): Resolved {
-        val boarding = list.flatMap { i -> i.legs.filter { it.kind == LegKind.WAIT || it.kind == LegKind.RIDE } }
-            .flatMap { it.options }.map { it.fromStop }.filter { it > 0 }.distinct().take(40)
+        val legs = list.flatMap { i -> i.legs.filter { it.kind == LegKind.WAIT || it.kind == LegKind.RIDE } }.flatMap { it.options }
+        // Boarding stops, plus where each ride gets off: Moovit's live prediction for your exact bus there
+        // is the best "when do I arrive" there is, better than the timetable or the phone's GPS.
+        val boarding = (legs.map { it.fromStop } + legs.map { it.toStop }).filter { it > 0 }.distinct().take(40)
         val (live, poll) = try { stopArrivals(s, boarding) } catch (e: Exception) { return prev }
         return Resolved(prev.lines, prev.stops, prev.routeTypes, live, shapesFor(s, list, live, prev.shapes), poll,
             patternsFor(s, list, live, prev.patterns))

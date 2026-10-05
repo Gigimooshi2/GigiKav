@@ -145,7 +145,7 @@ private fun pipCells(steps: List<Step>, index: Int, journey: ActiveJourney, fix:
     // On a ride: when do I get off (GPS-estimated if aboard, else timetable)
     if (step is Step.Ride) {
         val ride = boardingChoice(step.ride, step.wait, journey.chosen[step.legIndex] ?: 0).first
-        val gps = rideEta(ride, fix, now)
+        val gps = rideEta(ride, fix, now, r)
         out.add(PipCell(T("Get off", "ירידה"), (if (gps == null) "~" else "") + until(gps ?: ride.arr)))
     }
 

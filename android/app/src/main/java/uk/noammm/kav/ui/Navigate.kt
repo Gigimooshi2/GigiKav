@@ -445,13 +445,14 @@ internal fun StepCard(
             val aboard = active && fix?.let { it.isFresh(now) && it.aboard(ride.shape) } == true
             val stopsLeft = if (aboard && progress >= 1f) (stops.size - progress.toInt()).coerceAtLeast(0) else stops.size - 1
             val minLeft = if (!active) ride.minutes else {
-                val eta = rideEta(ride, fix, now) ?: if (now >= ride.dep) ride.arr else null
-                eta?.let { ((it - now + 59) / 60).toInt().coerceAtLeast(0) } ?: ride.minutes
+                // No live source and the timetable says you're already there: don't claim "0 min".
+                val eta = rideEta(ride, fix, now, r) ?: ride.arr.takeIf { now >= ride.dep && it > now }
+                eta?.let { ((it - now + 59) / 60).toInt().coerceAtLeast(0) } ?: if (now >= ride.arr) -1 else ride.minutes
             }
             Card(
                 T("Ride $stopsLeft stops to", "נסיעה $stopsLeft תחנות אל").takeIf { stopsLeft > 0 } ?: T("Ride to", "נסיעה אל"),
                 active,
-                trailing = T("$minLeft min", "$minLeft דק׳"),
+                trailing = if (minLeft < 0) "—" else T("$minLeft min", "$minLeft דק׳"),
             ) {
                 LineRow(ride, r)
                 Spacer(Modifier.height(K.gap2))

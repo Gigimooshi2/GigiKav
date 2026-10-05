@@ -286,13 +286,23 @@ internal fun walkLeft(leg: Moovit.Leg, fix: Fix?, now: Long): Pair<Int, Int> {
 }
 
 
-/** When you'll reach the stop you get off at, from your GPS position along the bus's route; null if not aboard. */
-internal fun rideEta(ride: Moovit.Leg, fix: Fix?, now: Long): Long? {
-    val f = fix?.takeIf { it.isFresh(now) && it.aboard(ride.shape) } ?: return null
+/**
+ * When you'll reach the stop you get off at, best source first:
+ * 1. Moovit's live prediction for this exact bus at that stop (handles detours and traffic),
+ * 2. the bus's own live position along the route, 3. your phone's GPS along the route.
+ * Null when none of them is available.
+ */
+internal fun rideEta(ride: Moovit.Leg, fix: Fix?, now: Long, r: Moovit.Resolved? = null): Long? {
+    val atStop = r?.live?.get(Moovit.ArrivalKey(ride.toStop, ride.tripId))
+    atStop?.rtUtc?.takeIf { it > 0 && !atStop.rtDropped && it >= now - 60 }?.let { return it }
     val len = pathLength(ride.shape)
     if (len <= 0 || ride.arr <= ride.dep) return null
-    val left = 1.0 - (alongPath(f.lat, f.lon, ride.shape) / len).coerceIn(0.0, 1.0)
-    return now + (left * (ride.arr - ride.dep)).toLong()
+    fun from(lat: Double, lon: Double) =
+        now + ((1.0 - (alongPath(lat, lon, ride.shape) / len).coerceIn(0.0, 1.0)) * (ride.arr - ride.dep)).toLong()
+    atStop?.takeIf { it.hasLocation && it.vehicleStatus != 2 && distanceToPath(it.lat, it.lon, ride.shape) < 80 }
+        ?.let { return from(it.lat, it.lon) }
+    val f = fix?.takeIf { it.isFresh(now) && it.aboard(ride.shape) } ?: return null
+    return from(f.lat, f.lon)
 }
 
 /**
@@ -305,7 +315,7 @@ internal fun liveArrival(steps: List<Step>, index: Int, journey: ActiveJourney, 
     val r = journey.resolved
     if (step is Step.Ride) {
         val ride = boardingChoice(step.ride, step.wait, journey.chosen[step.legIndex] ?: 0).first
-        val eta = rideEta(ride, fix, now) ?: return planned to false
+        val eta = rideEta(ride, fix, now, r) ?: return planned to false
         return planned + (eta - ride.arr).coerceAtLeast(-120) to true
     }
     val next = (index until steps.size).firstOrNull { steps[it] is Step.Wait } ?: return planned to false
