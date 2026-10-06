@@ -32,6 +32,7 @@ import uk.noammm.kav.PendingBackup
 import uk.noammm.kav.Prefs
 import uk.noammm.kav.data.Backup
 import uk.noammm.kav.data.Updates
+import androidx.lifecycle.repeatOnLifecycle
 
 @Composable
 fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
@@ -94,6 +95,9 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
 
         Group(T("your data", "הנתונים שלכם"))
         BackupSection(model)
+
+        Group(T("beta", "בטא"))
+        FloatingWindowRow()
 
         Group(T("updates", "עדכונים"))
         UpdateSection(model)
@@ -375,4 +379,59 @@ private fun PackChoices(inset: Dp) {
             "צבעים, פינות ומשטחים. בהיר, כהה ו-OLED עובדים עם כל ערכה."),
         fontSize = 11.sp, color = K.dim, modifier = Modifier.padding(horizontal = inset).padding(start = 2.dp, top = 6.dp),
     )
+}
+
+@Composable
+private fun FloatingWindowRow() {
+    val ctx = LocalContext.current
+    var on by remember { mutableStateOf(Prefs.floatingWindow(ctx)) }
+    var granted by remember { mutableStateOf(uk.noammm.kav.TripOverlay.permitted(ctx)) }
+    val life = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(life) {
+        // Coming back from the system permission screen.
+        life.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            granted = uk.noammm.kav.TripOverlay.permitted(ctx)
+        }
+    }
+    val desc = T(
+        "When you leave the app mid-trip, the current step floats over other apps instead of going " +
+            "into picture-in-picture, so it can sit next to a video that is in picture-in-picture. " +
+            "Drag to move, tap to open Kav, ✕ to close.",
+        "כשיוצאים מהאפליקציה באמצע נסיעה, השלב הנוכחי צף מעל אפליקציות אחרות במקום לעבור לתמונה בתוך תמונה, " +
+            "כך שהוא יכול להופיע לצד סרטון שנמצא בתמונה בתוך תמונה. גוררים כדי להזיז, מקישים כדי לפתוח את Kav, ✕ כדי לסגור.",
+    ) + if (on && !granted) T(
+        " Needs “Display over other apps”: turn the switch off and on to allow it.",
+        " דורש הרשאת „הצגה מעל אפליקציות אחרות”: כבו והפעילו את המתג כדי לאשר.",
+    ) else ""
+    Column(Modifier.fillMaxWidth().padding(horizontal = K.gap3)) {
+        SwitchRow(
+            T("Floating window", "חלון צף"),
+            desc,
+            on,
+            { v ->
+                on = v
+                Prefs.setFloatingWindow(ctx, v)
+                if (v && !uk.noammm.kav.TripOverlay.permitted(ctx)) uk.noammm.kav.TripOverlay.askPermission(ctx)
+                (ctx as? uk.noammm.kav.MainActivity)?.updatePipParams()
+            },
+        ) { FloatGlyph(if (on) K.text else K.dim, 18.dp) }
+    }
+}
+
+@Composable
+private fun FloatGlyph(tint: Color, size: Dp) {
+    Canvas(Modifier.size(size)) {
+        val s = this.size.minDimension
+        val r = androidx.compose.ui.geometry.CornerRadius(s * .1f)
+        drawRoundRect(
+            tint, topLeft = Offset(s * .06f, s * .14f),
+            size = androidx.compose.ui.geometry.Size(s * .64f, s * .5f),
+            cornerRadius = r, style = Stroke(width = s * .09f),
+        )
+        drawRoundRect(
+            tint, topLeft = Offset(s * .42f, s * .44f),
+            size = androidx.compose.ui.geometry.Size(s * .52f, s * .4f),
+            cornerRadius = r,
+        )
+    }
 }

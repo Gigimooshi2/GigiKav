@@ -124,11 +124,30 @@ object PendingBackup {
 }
 
 class MainActivity : ComponentActivity() {
-    override fun onStart() { super.onStart(); AutoUpdate.visible = true }
+    // Set when you leave for another app (home, recents, switching), as opposed to Kav opening
+    // one of its own screens or a picker. Only then does the beta floating window appear.
+    private var leaving = false
+
+    override fun onStart() {
+        super.onStart()
+        AutoUpdate.visible = true
+        leaving = false
+        TripOverlay.hide()
+    }
+    override fun onResume() {
+        super.onResume()
+        // The overlay permission may have just been granted in system settings.
+        updatePipParams()
+    }
     override fun onStop() {
         super.onStop()
         AutoUpdate.visible = false
         if (!isChangingConfigurations) { AutoUpdate.soon(this); TripWidget.refreshAll(this) }
+        if (!isChangingConfigurations && leaving && Pip.wanted && TripOverlay.active(this)) TripOverlay.show(this)
+    }
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isFinishing) TripOverlay.hide()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -176,13 +195,16 @@ class MainActivity : ComponentActivity() {
     fun updatePipParams() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(2, 1))
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) builder.setAutoEnterEnabled(Pip.wanted).setSeamlessResizeEnabled(false)
+        // With the beta floating window on, it takes over from PiP.
+        val pip = Pip.wanted && !TripOverlay.active(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) builder.setAutoEnterEnabled(pip).setSeamlessResizeEnabled(false)
         runCatching { setPictureInPictureParams(builder.build()) }
     }
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (Pip.wanted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        leaving = true
+        if (Pip.wanted && !TripOverlay.active(this) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             runCatching { enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(2, 1)).build()) }
         }
     }
@@ -342,6 +364,7 @@ private fun Root() {
     }
     val app = ctx.applicationContext
     val model: KavModel = viewModel { KavModel(Loaded.net, app) }
+    SideEffect { TripOverlay.model = model }
     LaunchedEffect(model) { if (!model.updateChecked) model.checkForUpdate(app) }
     var pickLook by remember { mutableStateOf(Prefs.pickLook(ctx)) }
     var pickSupport by remember { mutableStateOf(Prefs.pickSupport(ctx)) }
@@ -1230,6 +1253,10 @@ object Prefs {
 
     fun reroute(ctx: Context): Boolean = store(ctx).getBoolean("reroute", false)
     fun setReroute(ctx: Context, on: Boolean) { store(ctx).edit().putBoolean("reroute", on).apply() }
+
+    /** Beta: trip step floats over other apps instead of picture-in-picture. */
+    fun floatingWindow(ctx: Context): Boolean = store(ctx).getBoolean("floatingWindow", false)
+    fun setFloatingWindow(ctx: Context, on: Boolean) { store(ctx).edit().putBoolean("floatingWindow", on).apply() }
 
     fun favourites(ctx: Context): List<Favourite> = try {
         val arr = org.json.JSONArray(store(ctx).getString("favourites", "[]"))

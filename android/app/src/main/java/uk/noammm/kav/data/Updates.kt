@@ -29,8 +29,8 @@ object Updates {
     fun installedVersion(ctx: Context): String =
         runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "0"
 
-    fun latest(): Release {
-        val c = (URL("https://api.github.com/repos/$OWNER/$REPO/releases/latest").openConnection() as HttpURLConnection).apply {
+    private fun get(path: String): String {
+        val c = (URL("https://api.github.com/repos/$OWNER/$REPO/$path").openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000; readTimeout = 15_000
             setRequestProperty("Accept", "application/vnd.github+json")
             setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
@@ -38,7 +38,20 @@ object Updates {
         }
         val code = c.responseCode
         if (code != 200) throw RuntimeException("GitHub HTTP $code")
-        val o = JSONObject(c.inputStream.use { String(it.readBytes(), Charsets.UTF_8) })
+        return c.inputStream.use { String(it.readBytes(), Charsets.UTF_8) }
+    }
+
+    /**
+     * Stable builds follow the latest release. Beta builds (beta/ branches) follow the newest
+     * beta-* prerelease instead, so a stable build never overwrites a beta and vice versa.
+     */
+    fun latest(): Release {
+        val o = if (uk.noammm.kav.BuildConfig.BETA) {
+            val list = org.json.JSONArray(get("releases?per_page=30"))
+            (0 until list.length()).asSequence().mapNotNull { list.optJSONObject(it) }
+                .firstOrNull { !it.optBoolean("draft") && it.optString("tag_name").startsWith("beta-") }
+                ?: throw RuntimeException("No beta release yet")
+        } else JSONObject(get("releases/latest"))
         val assets = o.optJSONArray("assets")
         var apk: JSONObject? = null
         for (i in 0 until (assets?.length() ?: 0)) {
@@ -46,7 +59,7 @@ object Updates {
             if (a.optString("name").endsWith(".apk", ignoreCase = true)) { apk = a; break }
         }
         return Release(
-            version = o.optString("tag_name").removePrefix("v").removePrefix("V"),
+            version = o.optString("tag_name").removePrefix("beta-").removePrefix("v").removePrefix("V"),
             name = o.optString("name"),
             notes = o.optString("body"),
             apkUrl = apk?.optString("browser_download_url")?.takeIf { it.isNotBlank() },

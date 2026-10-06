@@ -1,7 +1,7 @@
 name: Build APK
 on:
   push:
-    branches: [main]
+    branches: [main, 'beta/**']
   workflow_dispatch:
 permissions:
   contents: write
@@ -50,6 +50,8 @@ jobs:
       - name: Build release APK
         working-directory: android
         shell: bash
+        env:
+          KAV_BETA: ${{ startsWith(github.ref, 'refs/heads/beta/') }}
         run: |
           chmod +x gradlew
           set -o pipefail
@@ -57,14 +59,31 @@ jobs:
       - name: Rename APK
         run: |
           mkdir out
-          cp android/app/build/outputs/apk/release/*.apk out/GigiKav-${{ github.run_number }}.apk
-      - uses: softprops/action-gh-release@v2
+          if [[ "$GITHUB_REF" == refs/heads/beta/* ]]; then
+            cp android/app/build/outputs/apk/release/*.apk out/GigiKav-beta-${{ github.run_number }}.apk
+          else
+            cp android/app/build/outputs/apk/release/*.apk out/GigiKav-${{ github.run_number }}.apk
+          fi
+        shell: bash
+      - if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v2.0.${{ github.run_number }}
           name: Build ${{ github.run_number }}
           body: ${{ github.event.head_commit.message }}
           files: out/*.apk
           make_latest: true
+      # Beta builds are prereleases: /releases/latest (what stable installs check) skips them.
+      - if: startsWith(github.ref, 'refs/heads/beta/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: beta-2.0.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Beta ${{ github.run_number }} (${{ github.ref_name }})
+          body: ${{ github.event.head_commit.message }}
+          files: out/*.apk
+          prerelease: true
+          make_latest: false
       - name: Publish log on failure
         if: failure()
         uses: softprops/action-gh-release@v2

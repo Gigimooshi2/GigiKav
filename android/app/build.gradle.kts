@@ -15,7 +15,10 @@ android {
         // CI builds count up from 1000 so every build installs as an update.
         val ci = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
         versionCode = if (ci != null) 1000 + ci else 19
-        versionName = if (ci != null) "2.0-gigi.$ci" else "2.0"
+        // Builds from beta/ branches: own version label and their own update channel.
+        val beta = System.getenv("KAV_BETA") == "true"
+        versionName = if (ci != null) (if (beta) "2.0-beta.$ci" else "2.0-gigi.$ci") else "2.0"
+        buildConfigField("boolean", "BETA", beta.toString())
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // MapLibre's renderer is native code. Every phone Kav can reach is arm64;
         // x86_64 stays so the release APK still installs on the emulator.
@@ -51,7 +54,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
 
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
