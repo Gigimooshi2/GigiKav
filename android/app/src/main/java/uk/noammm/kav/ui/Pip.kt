@@ -83,15 +83,12 @@ fun PipOverlay(model: KavModel) {
                     }
                 }
                 if (showDetail && waitTint != null && detail.contains(" · ")) {
-                    val pulse by rememberInfiniteTransition(label = "pipLive").animateFloat(
-                        if (waitLive) .55f else 1f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "pipPulse",
-                    )
                     // Colour the state word and the time: "Off route · in 2 min".
                     val cut = detail.lastIndexOf(" · ", detail.lastIndexOf(" · ") - 1).let { if (it >= 0) it + 3 else detail.lastIndexOf(" · ") + 3 }
                     Text(
                         buildAnnotatedString {
                             append(detail.substring(0, cut))
-                            withStyle(SpanStyle(color = waitTint.copy(alpha = pulse), fontWeight = FontWeight.SemiBold)) {
+                            withStyle(SpanStyle(color = waitTint, fontWeight = FontWeight.SemiBold)) {
                                 append(detail.substring(cut))
                             }
                         },
