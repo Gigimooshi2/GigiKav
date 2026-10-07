@@ -127,6 +127,26 @@
         <!-- "Ignore" on a faster-route notification -->
         <receiver android:name=".RerouteReceiver" android:exported="false" />
 
+        <!-- station widget: upcoming arrivals of one line at one stop -->
+        <receiver android:name=".StationWidget" android:exported="false" android:label="Kav station">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_station_info" />
+        </receiver>
+        <receiver android:name=".StationWidgetRefresh" android:exported="false" />
+        <activity
+            android:name=".StationWidgetConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="uk.noammm.kav.stationwidget"
+            android:theme="@style/Theme.Kav"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <!-- trip widget: bus options to a set destination -->
         <receiver android:name=".TripWidget" android:exported="false" android:label="Kav trip">
             <intent-filter>

@@ -128,7 +128,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         AutoUpdate.visible = false
-        if (!isChangingConfigurations) { AutoUpdate.soon(this); TripWidget.refreshAll(this) }
+        if (!isChangingConfigurations) { AutoUpdate.soon(this); TripWidget.refreshAll(this); StationWidget.refreshAll(this) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
