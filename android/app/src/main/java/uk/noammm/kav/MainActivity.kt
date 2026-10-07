@@ -881,9 +881,18 @@ fun lastKnownLocation(ctx: Context): Pair<Double, Double>? {
     } catch (e: SecurityException) { null }
 }
 
+private fun freshLastKnown(ctx: Context, maxAgeMs: Long): Pair<Double, Double>? = try {
+    val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+        .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+        .filter { System.currentTimeMillis() - it.time <= maxAgeMs }
+        .maxByOrNull { it.time }?.let { it.latitude to it.longitude }
+} catch (e: SecurityException) { null }
+
 fun requestLocationOnce(ctx: Context, onResult: (Pair<Double, Double>) -> Unit) {
     if (!hasLocationPermission(ctx)) return
-    lastKnownLocation(ctx)?.let(onResult)
+    // Only a recent last-known position is worth showing while the fresh fix comes in.
+    freshLastKnown(ctx, 120_000L)?.let(onResult)
     val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
     val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
         .filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }

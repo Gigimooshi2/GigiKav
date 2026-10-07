@@ -18,6 +18,9 @@ import kotlinx.coroutines.launch
 import androidx.compose.animation.togetherWith
 import kotlinx.coroutines.withContext
 import uk.noammm.kav.ActiveJourney
+import uk.noammm.kav.hasLocationPermission
+import uk.noammm.kav.requestLocationOnce
+import kotlinx.coroutines.flow.first
 import uk.noammm.kav.KavModel
 import uk.noammm.kav.Prefs
 import uk.noammm.kav.RecentTrip
@@ -78,6 +81,9 @@ fun DirectionsOnline(model: KavModel) {
     var departAt by remember { mutableLongStateOf(0L) }
     var nudgedAt by remember { mutableLongStateOf(0L) }
     var shifting by remember { mutableStateOf(false) }
+    var hereOrigin by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    var locating by remember { mutableStateOf(false) }
+    var linkNonce by remember { mutableIntStateOf(0) }
     var resumeSignal by remember { mutableIntStateOf(0) }
     val shiftScope = rememberCoroutineScope()
     var timeType by remember { mutableIntStateOf(Moovit.TIME_DEPARTURE) }
@@ -116,12 +122,28 @@ fun DirectionsOnline(model: KavModel) {
         timeType = Moovit.TIME_DEPARTURE
         open = null; autoOpen = null; picking = null
         linkTrip = link.rides.takeIf { it.isNotEmpty() && link.autoRun }
+        // A link (widget, shared trip) is a new question: take a fresh position, not the last one.
+        hereOrigin = null
+        linkNonce++
         showResults = link.autoRun
     }
 
-    var hereOrigin by remember { mutableStateOf<Pair<Double, Double>?>(null) }
-    LaunchedEffect(showResults, fromPlace == null, here == null) {
-        hereOrigin = if (showResults && fromPlace == null) hereOrigin ?: here else null
+    // Starting from "Current location": if the last fix is over a minute old, wait (up to 6 s) for a
+    // fresh one before planning, so a widget tap or a reopened app doesn't plan from where you were.
+    LaunchedEffect(showResults, fromPlace == null, here == null, linkNonce) {
+        if (!(showResults && fromPlace == null)) { hereOrigin = null; locating = false; return@LaunchedEffect }
+        if (hereOrigin != null) return@LaunchedEffect
+        fun stale(): Boolean {
+            val f = model.fix ?: return true
+            return System.currentTimeMillis() / 1000 - f.at > 60
+        }
+        if (stale()) {
+            locating = true
+            if (hasLocationPermission(ctx)) requestLocationOnce(ctx) { model.locate(it.first, it.second) }
+            kotlinx.coroutines.withTimeoutOrNull(6000) { snapshotFlow { model.fix }.first { !stale() } }
+            locating = false
+        }
+        hereOrigin = here
     }
     // Moved for real (not GPS jitter) while results are showing: re-plan from where you are now.
     LaunchedEffect(here) {
@@ -131,7 +153,7 @@ fun DirectionsOnline(model: KavModel) {
             metres(o.first, o.second, h.first, h.second) > 200
         ) hereOrigin = h
     }
-    val fromLL = fromPlace?.let { it.lat to it.lon } ?: hereOrigin ?: here
+    val fromLL = fromPlace?.let { it.lat to it.lon } ?: if (locating) null else hereOrigin ?: here
     val toLL = toPlace?.let { it.lat to it.lon }
     val fromIsHere = if (fromPlace == null) here != null else isHere(fromPlace)
 
@@ -513,6 +535,7 @@ fun DirectionsOnline(model: KavModel) {
                         Modifier.padding(K.gap4),
                     )
                 }
+                fromLL == null && locating -> item { Note(T("Finding where you are…", "מאתרים את המיקום שלכם…"), Modifier.padding(K.gap4)) }
                 fromLL == null -> item { Note(T("Choose a start to find routes.", "בחרו נקודת התחלה כדי למצוא מסלולים."), Modifier.padding(K.gap4)) }
                 planning -> item { LoadingBlock(T("Finding routes", "מחפשים מסלולים"), Modifier.fillParentMaxHeight(.6f)) }
                 shown.isEmpty() -> item {
