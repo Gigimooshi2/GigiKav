@@ -508,6 +508,37 @@ object Moovit {
         return best
     }
 
+    /**
+     * Moovit's id for a stop, matched on its printed stop code. Same-named stops on opposite sides of
+     * a street are metres apart, so nearest-by-name can pick the wrong direction; the code can't.
+     */
+    fun stopIdByCode(s: MoovitSession, name: String, code: Int, at: Pair<Double, Double>): Int? {
+        if (name.isBlank()) return null
+        val h = authHeaders(s) + mapOf("Accept" to "application/json")
+        val (status, raw) = post(
+            APP5, "V4/CloudSearch/FullSearch", searchBody(name, at, s.metroId, sections = listOf(1)), h, readMs = 4000,
+        )
+        if (status != 200) throw RuntimeException("Search HTTP $status")
+        val root = JSONObject(String(raw, Charsets.UTF_8))
+        val near = ArrayList<Pair<Int, Double>>()
+        forEachItem(jList(root, "2")) { item ->
+            if ((jInt(item, "1") ?: 0L).toInt() != 1) return@forEachItem
+            val id = (jInt(item, "2") ?: return@forEachItem).toInt()
+            val ll = jRec(item, "6") ?: return@forEachItem
+            val d = Math.hypot(
+                ((jInt(ll, "1") ?: 0L) / 1e6 - at.first) * 111_000,
+                ((jInt(ll, "2") ?: 0L) / 1e6 - at.second) * 93_000,
+            )
+            if (d < 400) near.add(id to d)
+        }
+        near.sortBy { it.second }
+        if (code > 0) for ((id, _) in near.take(6)) {
+            val info = runCatching { stopInfo(s, id) }.getOrNull() ?: continue
+            if (info.code.trim().trimStart('0') == code.toString().trimStart('0')) return id
+        }
+        return near.firstOrNull()?.first
+    }
+
     fun stopImages(s: MoovitSession, stopId: Int): List<String> {
         val h = authHeaders(s) + mapOf("Accept" to "application/json")
         val body = TWriter().apply { i32Field(1, stopId); stop() }.bytes()

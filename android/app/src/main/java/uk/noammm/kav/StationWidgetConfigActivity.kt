@@ -143,7 +143,12 @@ class StationWidgetConfigActivity : ComponentActivity() {
                                 val l = line ?: return@clickable
                                 busy = true; error = null
                                 scope.launch {
-                                    val mid = runCatching { StopPhotos.idOf(n, stop) }.getOrNull()
+                                    val mid = runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            val at = n.lat[stop].toDouble() to n.lon[stop].toDouble()
+                                            uk.noammm.kav.data.Moovit.stopIdByCode(Online.open(at), n.name[stop], n.code[stop], at)
+                                        }
+                                    }.getOrNull()
                                     busy = false
                                     if (mid == null) {
                                         error = T("Couldn't find this stop on Moovit. Check your connection and try again.",

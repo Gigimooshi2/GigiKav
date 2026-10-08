@@ -47,10 +47,10 @@ class StationWidget : AppWidgetProvider() {
     /** One widget's choice. moovitStop is Moovit's id for the stop, found when you set it up. */
     class Cfg(
         val stopName: String, val stopCode: Int, val lat: Double, val lon: Double,
-        val moovitStop: Int, val line: String, val paused: Boolean,
+        val moovitStop: Int, val line: String, val paused: Boolean, val byCode: Boolean = true,
     ) {
         fun json(): String = JSONObject().put("name", stopName).put("code", stopCode).put("lat", lat).put("lon", lon)
-            .put("mid", moovitStop).put("line", line).put("paused", paused).toString()
+            .put("mid", moovitStop).put("line", line).put("paused", paused).put("byCode", byCode).toString()
     }
 
     companion object {
@@ -60,7 +60,7 @@ class StationWidget : AppWidgetProvider() {
             runCatching {
                 val o = JSONObject(it)
                 Cfg(o.getString("name"), o.optInt("code"), o.getDouble("lat"), o.getDouble("lon"),
-                    o.getInt("mid"), o.getString("line"), o.optBoolean("paused"))
+                    o.getInt("mid"), o.getString("line"), o.optBoolean("paused"), o.optBoolean("byCode", false))
             }.getOrNull()
         }
 
@@ -165,7 +165,17 @@ class StationWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWor
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         val id = inputData.getInt("id", -1).takeIf { it >= 0 } ?: return Result.success()
-        val c = StationWidget.cfg(ctx, id) ?: return Result.success()
+        var c = StationWidget.cfg(ctx, id) ?: return Result.success()
+        // Set up before stops were matched by code: re-match once (it may have been the opposite side).
+        if (!c.byCode) runCatching {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                if (Online.session == null) Online.init(ctx)
+                Moovit.stopIdByCode(Online.open(c.lat to c.lon), c.stopName, c.stopCode, c.lat to c.lon)
+            }
+        }.getOrNull()?.let { mid ->
+            c = StationWidget.Cfg(c.stopName, c.stopCode, c.lat, c.lon, mid, c.line, c.paused, byCode = true)
+            StationWidget.store(ctx).edit().putString("cfg_$id", c.json()).apply()
+        }
         val prev = StationWidget.store(ctx).getString("rows_$id", null)?.let { runCatching { JSONObject(it) }.getOrNull() }
         val out = try {
             JSONObject().put("at", System.currentTimeMillis()).put("rows", fetch(ctx, c))
