@@ -53,9 +53,33 @@ object Reroute {
     /** Saved places (ids) to also consider: Kav takes whichever you'd reach first. */
     var alts by mutableStateOf<Set<String>>(emptySet())
 
-    fun setAlt(ctx: Context, favId: String, on: Boolean) {
-        alts = if (on) alts + favId else alts - favId
-        Prefs.setRerouteAlts(ctx, alts)
+    /** Bumped on any change to an alternatives list, so the menu and badge redraw. */
+    var altsVersion by mutableStateOf(0)
+
+    /** The saved place a trip's destination is (within 150 m), if any. */
+    fun savedPlaceAt(ctx: Context, dest: Pair<Double, Double>?) = dest?.let { d ->
+        Prefs.favourites(ctx).filter { it.place != null }
+            .minByOrNull { metres(it.place!!.lat, it.place.lon, d.first, d.second) }
+            ?.takeIf { metres(it.place!!.lat, it.place.lon, d.first, d.second) <= 150 }
+    }
+
+    /**
+     * Places to also consider for a trip to [dest]: a saved destination (Home, Work…) keeps its own
+     * list, used on every trip there; any other destination uses the general list.
+     */
+    fun altsFor(ctx: Context, dest: Pair<Double, Double>?): Set<String> =
+        savedPlaceAt(ctx, dest)?.let { Prefs.rerouteAltsFor(ctx, it.id) } ?: alts
+
+    fun setAlt(ctx: Context, dest: Pair<Double, Double>?, favId: String, on: Boolean) {
+        val owner = savedPlaceAt(ctx, dest)
+        if (owner != null) {
+            val now = Prefs.rerouteAltsFor(ctx, owner.id)
+            Prefs.setRerouteAltsFor(ctx, owner.id, if (on) now + favId else now - favId)
+        } else {
+            alts = if (on) alts + favId else alts - favId
+            Prefs.setRerouteAlts(ctx, alts)
+        }
+        altsVersion++
     }
     var offer by mutableStateOf<Offer?>(null)
     /** Set when the user accepts; DirectionsOnline swaps the running trip. */
@@ -184,10 +208,11 @@ object Reroute {
             s, from, to, at * 1000, Moovit.TIME_DEPARTURE,
             routeTypes = routeTypesFor(filters), skipTaxi = ResultFilter.TAXI !in filters,
         ).laidOut()
+        val wanted = altsFor(ctx, dest)
         // Where you could go: the trip's destination, plus any other saved places you ticked
         // (skipping ones that are really the same spot).
         val others = Prefs.favourites(ctx).filter { f ->
-            f.id in alts && f.place != null && metres(f.place.lat, f.place.lon, dest.first, dest.second) > 150
+            f.id in wanted && f.place != null && metres(f.place.lat, f.place.lon, dest.first, dest.second) > 150
         }.take(3)
         val list = withContext(Dispatchers.IO) { plan(dest) }
         // What's still ahead on the current plan, as line sets (a ride step carries all its options).

@@ -151,7 +151,7 @@ private fun TripDetailBody(
                 trip.legs.none { it.kind == Moovit.LegKind.RIDE }
             if (!taxiOnly) {
                 Spacer(Modifier.width(K.gap2))
-                RerouteToggle()
+                RerouteToggle(dest = trip.legs.lastOrNull { it.shape.isNotEmpty() }?.shape?.lastOrNull())
                 Spacer(Modifier.width(K.gap2))
                 StartButton(resume = active, onClick = onStart)
             }

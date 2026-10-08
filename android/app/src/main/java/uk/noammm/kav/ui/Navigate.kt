@@ -229,7 +229,7 @@ fun NavigateScreen(
                         Text("${dur((arrive - now).toInt().coerceAtLeast(0))} · ${hm.format(Date(arrive * 1000))}",
                             fontSize = 12.sp, color = K.muted, maxLines = 1)
                     }
-                    RerouteToggle(glass = false)
+                    RerouteToggle(glass = false, dest = trip.legs.lastOrNull { it.shape.isNotEmpty() }?.shape?.lastOrNull())
                     Box(
                         Modifier.size(48.dp).clip(RoundedCornerShape(24.dp))
                             .semantics { contentDescription = T("Show trip plan", "הצגת המסלול") }

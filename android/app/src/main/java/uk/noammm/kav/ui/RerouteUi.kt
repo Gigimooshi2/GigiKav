@@ -33,10 +33,13 @@ import uk.noammm.kav.Reroute
  * glass = draw its own glass plate (trip page); false inside an existing bar.
  */
 @Composable
-fun RerouteToggle(glass: Boolean = true) {
+fun RerouteToggle(glass: Boolean = true, dest: Pair<Double, Double>? = null) {
     val ctx = LocalContext.current
     val on = Reroute.enabled
     var menu by remember { mutableStateOf(false) }
+    @Suppress("UNUSED_VARIABLE") val v = Reroute.altsVersion   // redraw on list changes
+    val owner = remember(dest, Reroute.altsVersion) { Reroute.savedPlaceAt(ctx, dest) }
+    val chosen = remember(dest, Reroute.altsVersion, Reroute.alts) { Reroute.altsFor(ctx, dest) }
     Box {
         Box(
             Modifier.size(48.dp)
@@ -50,8 +53,8 @@ fun RerouteToggle(glass: Boolean = true) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Rounded.AltRoute, null, tint = if (on) K.accent else K.muted, modifier = Modifier.size(22.dp))
-            if (on && Reroute.alts.isNotEmpty()) Text(
-                "+${Reroute.alts.size}", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = K.onAccent,
+            if (on && chosen.isNotEmpty()) Text(
+                "+${chosen.size}", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = K.onAccent,
                 modifier = Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp)
                     .clip(RoundedCornerShape(999.dp)).background(K.accent).padding(horizontal = 4.dp),
             )
@@ -71,32 +74,37 @@ fun RerouteToggle(glass: Boolean = true) {
                         colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = K.accent),
                     )
                 }
-                val places = remember { uk.noammm.kav.Prefs.favourites(ctx).filter { it.place != null } }
+                val places = remember(owner) { uk.noammm.kav.Prefs.favourites(ctx).filter { it.place != null && it.id != owner?.id } }
                 if (places.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
-                    Text(T("Also consider", "לשקול גם"), fontSize = 13.sp, color = K.dim, fontWeight = FontWeight.Medium)
                     Text(
-                        T("Kav will point you at whichever you'd reach first.", "Kav תכוון אתכם למקום שתגיעו אליו הכי מהר."),
+                        owner?.let { T("Whenever you go to ${it.name}, also consider", "בכל נסיעה ל${it.name}, לשקול גם") }
+                            ?: T("Also consider", "לשקול גם"),
+                        fontSize = 13.sp, color = K.dim, fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        if (owner != null) T("Saved with ${owner.name}: applies to every trip there.", "נשמר עם ${owner.name}: חל על כל נסיעה לשם.")
+                        else T("Kav will point you at whichever you'd reach first.", "Kav תכוון אתכם למקום שתגיעו אליו הכי מהר."),
                         fontSize = 12.sp, color = K.dim,
                     )
                     Spacer(Modifier.height(8.dp))
                     for (f in places) {
-                        val picked = f.id in Reroute.alts
+                        val picked = f.id in chosen
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                                .clickable(enabled = on) { Reroute.setAlt(ctx, f.id, !picked) }
+                                .clickable(enabled = on) { Reroute.setAlt(ctx, dest, f.id, !picked) }
                                 .padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             androidx.compose.material3.Checkbox(
                                 checked = picked, enabled = on,
-                                onCheckedChange = { Reroute.setAlt(ctx, f.id, it) },
+                                onCheckedChange = { Reroute.setAlt(ctx, dest, f.id, it) },
                                 colors = androidx.compose.material3.CheckboxDefaults.colors(checkedColor = K.accent),
                             )
                             Text(f.name, fontSize = 15.sp, color = if (on) K.text else K.dim)
                         }
                     }
-                    if (Reroute.alts.size > 3) Text(
+                    if (chosen.size > 3) Text(
                         T("Only the first 3 are checked at a time.", "רק 3 הראשונים נבדקים בכל פעם."),
                         fontSize = 11.sp, color = K.dim,
                     )
