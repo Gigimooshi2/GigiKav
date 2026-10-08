@@ -15,12 +15,17 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DirectionsBus
+import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.ZoomOutMap
 import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.ui.geometry.Offset
@@ -689,7 +694,11 @@ private fun NavigateMap(
             else splitPath(route, off.first, off.second).first
         }
         .filter { it.size >= 2 }
-    val vehicles = rideLegs.mapNotNull { r.arrival(it)?.takeIf { a -> a.hasLocation } }
+    // A bus you're on may have dropped off its boarding stop's board; its prediction at your
+    // get-off stop still carries where it is.
+    fun busOf(l: Moovit.Leg) = r.arrival(l)?.takeIf { it.hasLocation }
+        ?: r.live[Moovit.ArrivalKey(l.toStop, l.tripId)]?.takeIf { it.hasLocation }
+    val vehicles = rideLegs.mapNotNull { busOf(it) }
     val vehicleModes = remember(rideLegs, r) {
         rideLegs.mapNotNull { leg ->
             r.arrival(leg)?.takeIf { it.hasLocation }
@@ -706,7 +715,7 @@ private fun NavigateMap(
         is Step.Ride -> boardingChoice(step.ride, step.wait, chosen[step.legIndex] ?: 0).first
         else -> null
     }
-    val focusedVehicle = chosenRide?.let { r.arrival(it) }?.takeIf { it.hasLocation }
+    val focusedVehicle = chosenRide?.let { busOf(it) }
     val chosenFocus = when (step) {
         is Step.Wait -> chosenRide?.shape?.take(1)
         is Step.Ride -> chosenRide?.shape
@@ -791,11 +800,67 @@ private fun NavigateMap(
         },
     )
 
-    TileMap(framedPoints, modifier, focusKey = step to chosenRide?.tripId,
-        fitMaxZoom = if (step is Step.Walk || step is Step.Arrive) 18.4f else Geo.MAX_Z.toFloat(),
-        recenterOn = here, contentPadding = contentPadding, follow = follow,
-        geometry = geometry, live = live,
-    )
+    // Map buttons: me / the bus / both. A choice holds until the step changes or Reset.
+    var view by remember(step) { mutableStateOf(MapFocus.AUTO) }
+    var nonce by remember { mutableIntStateOf(0) }
+    val bus = focusedVehicle?.let { it.lat to it.lon }
+    val viewPoints = when (view) {
+        MapFocus.ME -> listOfNotNull(here)
+        MapFocus.BUS -> listOfNotNull(bus)
+        MapFocus.BOTH -> listOfNotNull(here, bus)
+        MapFocus.AUTO -> emptyList()
+    }
+    val manual = view != MapFocus.AUTO && viewPoints.isNotEmpty()
+    Box(modifier) {
+        TileMap(if (manual) viewPoints else framedPoints, Modifier.fillMaxSize(),
+            focusKey = Triple(step, chosenRide?.tripId, if (manual) view to nonce else null),
+            fitMaxZoom = when {
+                manual && viewPoints.size == 1 -> 17f
+                step is Step.Walk || step is Step.Arrive -> 18.4f
+                else -> Geo.MAX_Z.toFloat()
+            },
+            recenterOn = here, contentPadding = contentPadding, follow = if (manual) null else follow,
+            geometry = geometry, live = live,
+        )
+        val layoutDir = LocalLayoutDirection.current
+        Column(
+            Modifier.align(Alignment.CenterEnd)
+                .padding(top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding())
+                .padding(end = contentPadding.calculateEndPadding(layoutDir) + K.gap3),
+            verticalArrangement = Arrangement.spacedBy(K.gap2),
+        ) {
+            MapViewButton(Icons.Rounded.MyLocation, T("Show me", "הצג אותי"), view == MapFocus.ME, here != null) {
+                view = MapFocus.ME; nonce++
+            }
+            MapViewButton(Icons.Rounded.DirectionsBus, T("Show the bus", "הצג את האוטובוס"), view == MapFocus.BUS, bus != null) {
+                view = MapFocus.BUS; nonce++
+            }
+            MapViewButton(Icons.Rounded.ZoomOutMap, T("Show me and the bus", "הצג אותי ואת האוטובוס"), view == MapFocus.BOTH,
+                here != null && bus != null) {
+                view = MapFocus.BOTH; nonce++
+            }
+            if (view != MapFocus.AUTO) MapViewButton(Icons.Rounded.Close, T("Back to the trip view", "חזרה לתצוגת הנסיעה"), false, true) {
+                view = MapFocus.AUTO; nonce++
+            }
+        }
+    }
+}
+
+private enum class MapFocus { AUTO, ME, BUS, BOTH }
+
+@Composable
+private fun MapViewButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, on: Boolean, enabled: Boolean, onClick: () -> Unit,
+) {
+    Box(
+        Modifier.size(44.dp).glassSurface(22.dp)
+            .then(if (on) Modifier.clip(RoundedCornerShape(22.dp)).background(K.accent.copy(alpha = .25f)) else Modifier)
+            .semantics { contentDescription = label }
+            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, null, tint = when { on -> K.accent; enabled -> K.text; else -> K.dim.copy(alpha = .5f) }, modifier = Modifier.size(20.dp))
+    }
 }
 
 internal fun rideStopPoints(legs: List<Moovit.Leg>, stops: Map<Int, Moovit.StopInfo>): List<Pair<Int, Pair<Double, Double>>> =
