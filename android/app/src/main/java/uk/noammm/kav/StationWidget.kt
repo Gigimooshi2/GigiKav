@@ -100,7 +100,9 @@ class StationWidget : AppWidgetProvider() {
             v.setTextViewText(R.id.trip_title, if (c == null) T("Kav station", "תחנה ב-Kav") else T("Line ${c.line}", "קו ${c.line}"))
             v.setTextViewText(R.id.trip_sub, listOfNotNull(
                 c?.stopName,
-                saved?.optLong("at")?.takeIf { it > 0 }?.let { T("updated ", "עודכן ") + hm.format(Date(it)) },
+                saved?.optLong("at")?.takeIf { it > 0 }?.let {
+                    (if (saved.optBoolean("offline")) T("offline · from ", "לא מחובר · מ-") else T("updated ", "עודכן ")) + hm.format(Date(it))
+                },
                 T("paused", "מושהה").takeIf { c?.paused == true },
             ).joinToString(" · "))
             v.removeAllViews(R.id.trip_rows)
@@ -164,13 +166,24 @@ class StationWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWor
         val ctx = applicationContext
         val id = inputData.getInt("id", -1).takeIf { it >= 0 } ?: return Result.success()
         val c = StationWidget.cfg(ctx, id) ?: return Result.success()
+        val prev = StationWidget.store(ctx).getString("rows_$id", null)?.let { runCatching { JSONObject(it) }.getOrNull() }
         val out = try {
             JSONObject().put("at", System.currentTimeMillis()).put("rows", fetch(ctx, c))
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
+        } catch (e: java.io.IOException) {
+            // No internet (or Moovit didn't answer): keep the last good times on screen, marked as old,
+            // and let WorkManager retry with backoff once the network is back.
+            android.util.Log.w("KavStationWidget", "offline", e)
+            val keep = prev?.takeIf { (it.optJSONArray("rows")?.length() ?: 0) > 0 }
+            val o = keep?.put("offline", true) ?: JSONObject().put("at", 0L)
+                .put("error", T("No internet right now. Retrying…", "אין אינטרנט כרגע. מנסה שוב…"))
+            StationWidget.store(ctx).edit().putString("rows_$id", o.toString()).apply()
+            StationWidget.render(ctx, id)
+            return if (runAttemptCount < 4) Result.retry() else Result.success()
         } catch (e: Exception) {
             android.util.Log.w("KavStationWidget", "refresh failed", e)
-            JSONObject().put("at", System.currentTimeMillis()).put("error", T("Couldn't reach Moovit", "לא ניתן להגיע ל-Moovit"))
+            JSONObject().put("at", System.currentTimeMillis()).put("error", e.message ?: T("Couldn't reach Moovit", "לא ניתן להגיע ל-Moovit"))
         }
         StationWidget.store(ctx).edit().putString("rows_$id", out.toString()).apply()
         StationWidget.render(ctx, id)

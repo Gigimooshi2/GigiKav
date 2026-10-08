@@ -139,7 +139,9 @@ class TripWidget : AppWidgetProvider() {
             val sub = listOfNotNull(
                 T("from ", "מ") + (origin?.name ?: T("here", "כאן")),
                 whenText,
-                saved?.optLong("at")?.takeIf { it > 0 }?.let { T("updated ", "עודכן ") + hm.format(Date(it)) },
+                saved?.optLong("at")?.takeIf { it > 0 }?.let {
+                    (if (saved.optBoolean("offline")) T("offline · from ", "לא מחובר · מ-") else T("updated ", "עודכן ")) + hm.format(Date(it))
+                },
                 T("paused", "מושהה").takeIf { c.paused },
             ).joinToString(" · ")
             v.setTextViewText(R.id.trip_sub, sub)
@@ -207,10 +209,21 @@ class TripWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         val id = inputData.getInt("id", -1).takeIf { it >= 0 } ?: return Result.success()
+        val prev = TripWidget.store(ctx).getString("rows_$id", null)?.let { runCatching { JSONObject(it) }.getOrNull() }
         val out = try {
             JSONObject().put("at", System.currentTimeMillis()).put("rows", fetch(ctx, id))
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
+        } catch (e: java.io.IOException) {
+            // No internet (or Moovit didn't answer): keep the last good times on screen, marked as old,
+            // and let WorkManager retry with backoff once the network is back.
+            android.util.Log.w("KavTripWidget", "offline", e)
+            val keep = prev?.takeIf { (it.optJSONArray("rows")?.length() ?: 0) > 0 }
+            val o = keep?.put("offline", true) ?: JSONObject().put("at", 0L)
+                .put("error", T("No internet right now. Retrying…", "אין אינטרנט כרגע. מנסה שוב…"))
+            TripWidget.store(ctx).edit().putString("rows_$id", o.toString()).apply()
+            TripWidget.render(ctx, id)
+            return if (runAttemptCount < 4) Result.retry() else Result.success()
         } catch (e: Exception) {
             android.util.Log.w("KavTripWidget", "refresh failed", e)
             JSONObject().put("at", System.currentTimeMillis()).put("error", e.message ?: T("Couldn't reach Moovit", "לא ניתן להגיע ל-Moovit"))
