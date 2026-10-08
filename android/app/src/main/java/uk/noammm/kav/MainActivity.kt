@@ -1238,6 +1238,8 @@ object Prefs {
     }
 
     fun reroute(ctx: Context): Boolean = store(ctx).getBoolean("reroute", false)
+    fun rerouteAlts(ctx: Context): Set<String> = store(ctx).getStringSet("rerouteAlts", emptySet()).orEmpty().toSet()
+    fun setRerouteAlts(ctx: Context, ids: Set<String>) { store(ctx).edit().putStringSet("rerouteAlts", ids).apply() }
     fun setReroute(ctx: Context, on: Boolean) { store(ctx).edit().putBoolean("reroute", on).apply() }
 
     fun favourites(ctx: Context): List<Favourite> = try {

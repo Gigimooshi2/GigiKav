@@ -307,7 +307,7 @@ fun DirectionsOnline(model: KavModel) {
     LaunchedEffect(uk.noammm.kav.Reroute.switchTo) {
         val o = uk.noammm.kav.Reroute.switchTo ?: return@LaunchedEffect
         uk.noammm.kav.Reroute.switchTo = null
-        val toLabel = model.activeJourney?.toLabel ?: open?.toLabel ?: T("Destination", "יעד")
+        val toLabel = o.toLabel ?: model.activeJourney?.toLabel ?: open?.toLabel ?: T("Destination", "יעד")
         val fromLabel = T("Current location", "המיקום הנוכחי")
         model.journeyStep = 0
         model.activeJourney = ActiveJourney(o.trip, o.resolved, fromLabel, toLabel)

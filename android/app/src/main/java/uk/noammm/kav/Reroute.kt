@@ -45,9 +45,18 @@ object Reroute {
         val headline: String,
         val detail: String,
         val sig: String,
+        /** Set when this offer goes to one of the other destinations; null = the trip's own. */
+        val toLabel: String? = null,
     )
 
     var enabled by mutableStateOf(false)
+    /** Saved places (ids) to also consider: Kav takes whichever you'd reach first. */
+    var alts by mutableStateOf<Set<String>>(emptySet())
+
+    fun setAlt(ctx: Context, favId: String, on: Boolean) {
+        alts = if (on) alts + favId else alts - favId
+        Prefs.setRerouteAlts(ctx, alts)
+    }
     var offer by mutableStateOf<Offer?>(null)
     /** Set when the user accepts; DirectionsOnline swaps the running trip. */
     var switchTo by mutableStateOf<Offer?>(null)
@@ -56,7 +65,7 @@ object Reroute {
     private var lastSwitchAt = 0L
     private var notifiedSig: String? = null
 
-    fun load(ctx: Context) { enabled = Prefs.reroute(ctx) }
+    fun load(ctx: Context) { enabled = Prefs.reroute(ctx); alts = Prefs.rerouteAlts(ctx) }
 
     fun toggle(ctx: Context) {
         enabled = !enabled
@@ -171,18 +180,29 @@ object Reroute {
     ): Offer? {
         val filters = Prefs.filters(ctx)
         val s = Online.open(from)
-        val plan = withContext(Dispatchers.IO) {
-            Moovit.planItineraries(
-                s, from, dest, at * 1000, Moovit.TIME_DEPARTURE,
-                routeTypes = routeTypesFor(filters), skipTaxi = ResultFilter.TAXI !in filters,
-            )
-        }
-        val list = plan.laidOut()
+        fun plan(to: Pair<Double, Double>) = Moovit.planItineraries(
+            s, from, to, at * 1000, Moovit.TIME_DEPARTURE,
+            routeTypes = routeTypesFor(filters), skipTaxi = ResultFilter.TAXI !in filters,
+        ).laidOut()
+        // Where you could go: the trip's destination, plus any other saved places you ticked
+        // (skipping ones that are really the same spot).
+        val others = Prefs.favourites(ctx).filter { f ->
+            f.id in alts && f.place != null && metres(f.place.lat, f.place.lon, dest.first, dest.second) > 150
+        }.take(3)
+        val list = withContext(Dispatchers.IO) { plan(dest) }
         // What's still ahead on the current plan, as line sets (a ride step carries all its options).
         val remaining = steps.drop(idx).filterIsInstance<Step.Ride>().map { it.ride.lineChoices.toSet() }
         fun same(it: Moovit.Itinerary) = it.rides.size == remaining.size &&
             it.rides.zip(remaining).all { (leg, want) -> leg.lineChoices.any { c -> c in want } }
         val baseline = list.filter(::same).minOfOrNull { it.arr } ?: j.trip.arr
+        val pool = ArrayList<Pair<String?, Moovit.Itinerary>>()
+        list.filter { !same(it) }.forEach { pool.add(null to it) }
+        for (f in others) {
+            val p = f.place ?: continue
+            runCatching { withContext(Dispatchers.IO) { plan(p.lat to p.lon) } }
+                .onFailure { android.util.Log.w("KavReroute", "plan to ${f.name} failed", it) }
+                .getOrNull()?.forEach { pool.add(f.name to it) }
+        }
         val modes = j.trip.legs.map { it.kind }.toSet() + Moovit.LegKind.WALK + Moovit.LegKind.WAIT
         val needsRide = j.trip.legs.any { it.kind == Moovit.LegKind.RIDE }
         fun catchable(it: Moovit.Itinerary): Boolean {
@@ -193,14 +213,15 @@ object Reroute {
             val reachStop = if (first == 0) at else it.legs[first - 1].arr.takeIf { a -> a > 0 } ?: at
             return ride.dep - reachStop >= CATCH_MARGIN
         }
-        val best = list.asSequence()
-            .filter { !same(it) && it.arr > 0 && it.arr <= baseline - MIN_GAIN && catchable(it) }
-            .filter { it.legs.none { l -> l.kind == Moovit.LegKind.OTHER } || ResultFilter.SHARED in filters }
+        fun sig(to: String?, c: Moovit.Itinerary) = sigOf(c) + (to?.let { "@$it" } ?: "")
+        val (bestTo, best) = pool.asSequence()
+            .filter { (_, c) -> c.arr > 0 && c.arr <= baseline - MIN_GAIN && catchable(c) }
+            .filter { (_, c) -> c.legs.none { l -> l.kind == Moovit.LegKind.OTHER } || ResultFilter.SHARED in filters }
             // Stay in the trip's own modes: a bus trip only ever gets bus (and walking) alternatives,
             // never a bike, taxi or scooter, and never a walk-only route.
-            .filter { c -> c.legs.all { it.kind in modes } && (!needsRide || c.legs.any { it.kind == Moovit.LegKind.RIDE }) }
-            .filter { c -> dismissed[sigOf(c)]?.let { c.arr <= it - REOFFER_GAIN } ?: true }
-            .minByOrNull { it.arr } ?: return null
+            .filter { (_, c) -> c.legs.all { it.kind in modes } && (!needsRide || c.legs.any { it.kind == Moovit.LegKind.RIDE }) }
+            .filter { (to, c) -> dismissed[sig(to, c)]?.let { c.arr <= it - REOFFER_GAIN } ?: true }
+            .minByOrNull { (_, c) -> c.arr } ?: return null
 
         val r = withContext(Dispatchers.IO) { Moovit.hydrate(s, listOf(best)) }
         fun name(l: Moovit.Leg) = l.shortName.ifBlank { r.line(l.lineId)?.number.orEmpty() }.ifBlank { T("bus", "אוטובוס") }
@@ -222,11 +243,11 @@ object Reroute {
                 T("Stay on, then take ${name(rides[1])}", "הישארו באוטובוס, ואז ${name(rides[1])}")
             first != null -> T("Take ${name(first)} instead", "קחו את ${name(first)} במקום")
             else -> T("Walk instead", "עדיף ללכת")
-        }
+        }.let { h -> if (bestTo != null) T("Go to $bestTo: ", "סעו ל$bestTo: ") + h.replaceFirstChar { it.lowercase() } else h }
         val hm = SimpleDateFormat("HH:mm", Locale.US)
         val detail = T("Faster: arrive ${hm.format(Date(best.arr * 1000))} (−$gainMin min)",
             "מהיר יותר: הגעה ב-${hm.format(Date(best.arr * 1000))} (−$gainMin דק׳)")
-        return Offer(best, r, gain, urgent, headline, detail, sigOf(best))
+        return Offer(best, r, gain, urgent, headline, detail, sig(bestTo, best), bestTo)
     }
 
     private fun sigOf(t: Moovit.Itinerary) = t.rides.joinToString(">") { it.lineId.toString() }
