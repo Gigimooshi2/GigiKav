@@ -1238,12 +1238,30 @@ object Prefs {
     }
 
     fun reroute(ctx: Context): Boolean = store(ctx).getBoolean("reroute", false)
-    fun rerouteAlts(ctx: Context): Set<String> = store(ctx).getStringSet("rerouteAlts", emptySet()).orEmpty().toSet()
-    fun setRerouteAlts(ctx: Context, ids: Set<String>) { store(ctx).edit().putStringSet("rerouteAlts", ids).apply() }
-    fun rerouteAltsFor(ctx: Context, favId: String): Set<String> =
-        store(ctx).getStringSet("rerouteAlts_$favId", emptySet()).orEmpty().toSet()
-    fun setRerouteAltsFor(ctx: Context, favId: String, ids: Set<String>) {
-        store(ctx).edit().putStringSet("rerouteAlts_$favId", ids).apply()
+    /** Smart reroute's "also consider" places, as plain places (not tied to saved places). */
+    fun rerouteAltPlaces(ctx: Context, key: String): List<Moovit.Place> {
+        val raw = store(ctx).getString("rerouteAltPlaces_$key", null)
+        if (raw == null) {
+            // Earlier builds kept saved-place ids: carry those over once, as plain places.
+            val oldKey = if (key == "general") "rerouteAlts" else "rerouteAlts_" + key.removePrefix("fav_")
+            val ids = store(ctx).getStringSet(oldKey, null) ?: return emptyList()
+            val moved = favourites(ctx).filter { it.id in ids }.mapNotNull { f -> f.place?.let { Moovit.Place(f.name, it.detail, it.lat, it.lon) } }
+            setRerouteAltPlaces(ctx, key, moved)
+            store(ctx).edit().remove(oldKey).apply()
+            return moved
+        }
+        return runCatching {
+            val arr = org.json.JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                Moovit.Place(o.getString("n"), o.optString("d"), o.getDouble("la"), o.getDouble("lo"))
+            }
+        }.getOrDefault(emptyList())
+    }
+    fun setRerouteAltPlaces(ctx: Context, key: String, list: List<Moovit.Place>) {
+        val arr = org.json.JSONArray()
+        list.forEach { arr.put(org.json.JSONObject().put("n", it.name).put("d", it.detail).put("la", it.lat).put("lo", it.lon)) }
+        store(ctx).edit().putString("rerouteAltPlaces_$key", arr.toString()).apply()
     }
     fun setReroute(ctx: Context, on: Boolean) { store(ctx).edit().putBoolean("reroute", on).apply() }
 

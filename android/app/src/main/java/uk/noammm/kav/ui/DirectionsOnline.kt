@@ -293,6 +293,15 @@ fun DirectionsOnline(model: KavModel) {
 
     val under by underSearch(picking != null)
 
+    // Smart reroute's "＋ Add a place": open the normal place search, result goes to that list.
+    var altFor by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    LaunchedEffect(uk.noammm.kav.Reroute.addingFor) {
+        val d = uk.noammm.kav.Reroute.addingFor ?: return@LaunchedEffect
+        uk.noammm.kav.Reroute.addingFor = null
+        altFor = d.takeIf { it.first != 0.0 || it.second != 0.0 }
+        picking = "alt"
+    }
+
     // Trip notification tapped: open the running trip, not the home screen.
     LaunchedEffect(uk.noammm.kav.PendingLink.openTrip) {
         if (!uk.noammm.kav.PendingLink.openTrip) return@LaunchedEffect
@@ -587,9 +596,13 @@ fun DirectionsOnline(model: KavModel) {
     ) { which ->
         if (which != null) {
         PlacePicker(
-            title = if (which == "from") T("start…", "התחלה…") else T("destination…", "יעד…"),
+            title = when (which) {
+                "from" -> T("start…", "התחלה…")
+                "alt" -> T("also consider…", "לשקול גם…")
+                else -> T("destination…", "יעד…")
+            },
             here = here,
-            allowMyLocation = which != "fav",
+            allowMyLocation = which != "fav" && which != "alt",
             initialSetting = if (which == "fav") settingFav else null,
             onMyLocation = {
                 if (which == "from") fromPlace = null
@@ -599,6 +612,12 @@ fun DirectionsOnline(model: KavModel) {
                 model.placeQuery = ""
             },
             onPick = { p ->
+                if (which == "alt") {
+                    uk.noammm.kav.Reroute.addAlt(ctx, altFor, p)
+                    picking = null
+                    model.placeQuery = ""
+                    return@PlacePicker
+                }
                 if (which == "from") fromPlace = p else toPlace = p
                 picking = null
                 if (which != "from" || toPlace != null) showResults = true

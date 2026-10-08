@@ -37,9 +37,8 @@ fun RerouteToggle(glass: Boolean = true, dest: Pair<Double, Double>? = null) {
     val ctx = LocalContext.current
     val on = Reroute.enabled
     var menu by remember { mutableStateOf(false) }
-    @Suppress("UNUSED_VARIABLE") val v = Reroute.altsVersion   // redraw on list changes
     val owner = remember(dest, Reroute.altsVersion) { Reroute.savedPlaceAt(ctx, dest) }
-    val chosen = remember(dest, Reroute.altsVersion, Reroute.alts) { Reroute.altsFor(ctx, dest) }
+    val chosen = remember(dest, Reroute.altsVersion) { Reroute.altsFor(ctx, dest) }
     Box {
         Box(
             Modifier.size(48.dp)
@@ -74,41 +73,42 @@ fun RerouteToggle(glass: Boolean = true, dest: Pair<Double, Double>? = null) {
                         colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = K.accent),
                     )
                 }
-                val places = remember(owner) { uk.noammm.kav.Prefs.favourites(ctx).filter { it.place != null && it.id != owner?.id } }
-                if (places.isNotEmpty()) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        owner?.let { T("Whenever you go to ${it.name}, also consider", "בכל נסיעה ל${it.name}, לשקול גם") }
-                            ?: T("Also consider", "לשקול גם"),
-                        fontSize = 13.sp, color = K.dim, fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        if (owner != null) T("Saved with ${owner.name}: applies to every trip there.", "נשמר עם ${owner.name}: חל על כל נסיעה לשם.")
-                        else T("Kav will point you at whichever you'd reach first.", "Kav תכוון אתכם למקום שתגיעו אליו הכי מהר."),
-                        fontSize = 12.sp, color = K.dim,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    for (f in places) {
-                        val picked = f.id in chosen
-                        Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                                .clickable(enabled = on) { Reroute.setAlt(ctx, dest, f.id, !picked) }
-                                .padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            androidx.compose.material3.Checkbox(
-                                checked = picked, enabled = on,
-                                onCheckedChange = { Reroute.setAlt(ctx, dest, f.id, it) },
-                                colors = androidx.compose.material3.CheckboxDefaults.colors(checkedColor = K.accent),
-                            )
-                            Text(f.name, fontSize = 15.sp, color = if (on) K.text else K.dim)
-                        }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    owner?.let { T("Whenever you go to ${it.name}, also consider", "בכל נסיעה ל${it.name}, לשקול גם") }
+                        ?: T("Also consider", "לשקול גם"),
+                    fontSize = 13.sp, color = K.dim, fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    T("Any places. Kav points you at whichever you'd reach first.", "כל מקום. Kav תכוון אתכם למקום שתגיעו אליו הכי מהר."),
+                    fontSize = 12.sp, color = K.dim,
+                )
+                Spacer(Modifier.height(6.dp))
+                for ((i, p) in chosen.withIndex()) Row(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(p.name, fontSize = 15.sp, color = if (on && i < 3) K.text else K.dim, maxLines = 1)
+                        if (p.detail.isNotBlank()) Text(p.detail, fontSize = 11.sp, color = K.dim, maxLines = 1)
                     }
-                    if (chosen.size > 3) Text(
-                        T("Only the first 3 are checked at a time.", "רק 3 הראשונים נבדקים בכל פעם."),
-                        fontSize = 11.sp, color = K.dim,
+                    Text(
+                        "✕", fontSize = 16.sp, color = K.dim,
+                        modifier = Modifier.clip(RoundedCornerShape(999.dp))
+                            .clickable { Reroute.removeAlt(ctx, dest, p) }.padding(horizontal = 10.dp, vertical = 4.dp),
                     )
                 }
+                if (chosen.size > 3) Text(
+                    T("Only the first 3 are checked at a time.", "רק 3 הראשונים נבדקים בכל פעם."),
+                    fontSize = 11.sp, color = K.dim,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    T("＋ Add a place", "＋ הוספת מקום"), fontSize = 14.sp, color = K.accent, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp))
+                        .clickable { menu = false; Reroute.addingFor = dest ?: (0.0 to 0.0) }
+                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                )
             }
         }
     }

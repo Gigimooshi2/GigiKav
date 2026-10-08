@@ -50,37 +50,42 @@ object Reroute {
     )
 
     var enabled by mutableStateOf(false)
-    /** Saved places (ids) to also consider: Kav takes whichever you'd reach first. */
-    var alts by mutableStateOf<Set<String>>(emptySet())
-
     /** Bumped on any change to an alternatives list, so the menu and badge redraw. */
     var altsVersion by mutableStateOf(0)
+    /** Set while the place search is open to add an alternative for a trip to this destination. */
+    var addingFor by mutableStateOf<Pair<Double, Double>?>(null)
 
-    /** The saved place a trip's destination is (within 150 m), if any. */
+    /** The saved place a trip's destination is (within 150 m), if any. Only used to key its list. */
     fun savedPlaceAt(ctx: Context, dest: Pair<Double, Double>?) = dest?.let { d ->
         Prefs.favourites(ctx).filter { it.place != null }
             .minByOrNull { metres(it.place!!.lat, it.place.lon, d.first, d.second) }
             ?.takeIf { metres(it.place!!.lat, it.place.lon, d.first, d.second) <= 150 }
     }
 
-    /**
-     * Places to also consider for a trip to [dest]: a saved destination (Home, Work…) keeps its own
-     * list, used on every trip there; any other destination uses the general list.
-     */
-    fun altsFor(ctx: Context, dest: Pair<Double, Double>?): Set<String> =
-        savedPlaceAt(ctx, dest)?.let { Prefs.rerouteAltsFor(ctx, it.id) } ?: alts
+    private fun keyFor(ctx: Context, dest: Pair<Double, Double>?) =
+        savedPlaceAt(ctx, dest)?.let { "fav_${it.id}" } ?: "general"
 
-    fun setAlt(ctx: Context, dest: Pair<Double, Double>?, favId: String, on: Boolean) {
-        val owner = savedPlaceAt(ctx, dest)
-        if (owner != null) {
-            val now = Prefs.rerouteAltsFor(ctx, owner.id)
-            Prefs.setRerouteAltsFor(ctx, owner.id, if (on) now + favId else now - favId)
-        } else {
-            alts = if (on) alts + favId else alts - favId
-            Prefs.setRerouteAlts(ctx, alts)
-        }
+    /**
+     * Places to also consider on a trip to [dest]: any places at all (addresses, stops, businesses),
+     * kept in their own list. A trip to a saved destination (Home, Work…) has its own list, reused on
+     * every trip there; any other destination shares the general list.
+     */
+    fun altsFor(ctx: Context, dest: Pair<Double, Double>?): List<Moovit.Place> = Prefs.rerouteAltPlaces(ctx, keyFor(ctx, dest))
+
+    fun addAlt(ctx: Context, dest: Pair<Double, Double>?, p: Moovit.Place) {
+        val key = keyFor(ctx, dest)
+        val list = Prefs.rerouteAltPlaces(ctx, key)
+        if (list.any { metres(it.lat, it.lon, p.lat, p.lon) < 50 }) return
+        Prefs.setRerouteAltPlaces(ctx, key, list + p)
         altsVersion++
     }
+
+    fun removeAlt(ctx: Context, dest: Pair<Double, Double>?, p: Moovit.Place) {
+        val key = keyFor(ctx, dest)
+        Prefs.setRerouteAltPlaces(ctx, key, Prefs.rerouteAltPlaces(ctx, key).filterNot { it.lat == p.lat && it.lon == p.lon })
+        altsVersion++
+    }
+
     var offer by mutableStateOf<Offer?>(null)
     /** Set when the user accepts; DirectionsOnline swaps the running trip. */
     var switchTo by mutableStateOf<Offer?>(null)
@@ -89,7 +94,7 @@ object Reroute {
     private var lastSwitchAt = 0L
     private var notifiedSig: String? = null
 
-    fun load(ctx: Context) { enabled = Prefs.reroute(ctx); alts = Prefs.rerouteAlts(ctx) }
+    fun load(ctx: Context) { enabled = Prefs.reroute(ctx) }
 
     fun toggle(ctx: Context) {
         enabled = !enabled
@@ -208,12 +213,9 @@ object Reroute {
             s, from, to, at * 1000, Moovit.TIME_DEPARTURE,
             routeTypes = routeTypesFor(filters), skipTaxi = ResultFilter.TAXI !in filters,
         ).laidOut()
-        val wanted = altsFor(ctx, dest)
-        // Where you could go: the trip's destination, plus any other saved places you ticked
+        // Where you could go: the trip's destination, plus the places on its "also consider" list
         // (skipping ones that are really the same spot).
-        val others = Prefs.favourites(ctx).filter { f ->
-            f.id in wanted && f.place != null && metres(f.place.lat, f.place.lon, dest.first, dest.second) > 150
-        }.take(3)
+        val others = altsFor(ctx, dest).filter { metres(it.lat, it.lon, dest.first, dest.second) > 150 }.take(3)
         val list = withContext(Dispatchers.IO) { plan(dest) }
         // What's still ahead on the current plan, as line sets (a ride step carries all its options).
         val remaining = steps.drop(idx).filterIsInstance<Step.Ride>().map { it.ride.lineChoices.toSet() }
@@ -222,11 +224,10 @@ object Reroute {
         val baseline = list.filter(::same).minOfOrNull { it.arr } ?: j.trip.arr
         val pool = ArrayList<Pair<String?, Moovit.Itinerary>>()
         list.filter { !same(it) }.forEach { pool.add(null to it) }
-        for (f in others) {
-            val p = f.place ?: continue
+        for (p in others) {
             runCatching { withContext(Dispatchers.IO) { plan(p.lat to p.lon) } }
-                .onFailure { android.util.Log.w("KavReroute", "plan to ${f.name} failed", it) }
-                .getOrNull()?.forEach { pool.add(f.name to it) }
+                .onFailure { android.util.Log.w("KavReroute", "plan to ${p.name} failed", it) }
+                .getOrNull()?.forEach { pool.add(p.name to it) }
         }
         val modes = j.trip.legs.map { it.kind }.toSet() + Moovit.LegKind.WALK + Moovit.LegKind.WAIT
         val needsRide = j.trip.legs.any { it.kind == Moovit.LegKind.RIDE }
