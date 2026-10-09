@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DirectionsBus
+import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.ZoomOutMap
 import androidx.compose.material.icons.automirrored.rounded.Login
@@ -804,10 +805,19 @@ private fun NavigateMap(
     var view by remember(step) { mutableStateOf(MapFocus.AUTO) }
     var nonce by remember { mutableIntStateOf(0) }
     val bus = focusedVehicle?.let { it.lat to it.lon }
+    // Where the step you're on ends: the stop you walk to, the stop you board at, the stop you get off at…
+    val stepEnd = when (step) {
+        is Step.Walk -> step.leg.shape.lastOrNull()
+        is Step.Wait -> chosenRide?.shape?.firstOrNull()
+        is Step.Ride -> chosenRide?.shape?.lastOrNull()
+        else -> step?.focus?.lastOrNull()
+    }
+    val finalDest = legs.last().shape.lastOrNull()
     val viewPoints = when (view) {
         MapFocus.ME -> listOfNotNull(here)
         MapFocus.BUS -> listOfNotNull(bus)
-        MapFocus.BOTH -> listOfNotNull(here, bus)
+        MapFocus.NEXT -> listOfNotNull(here, stepEnd)
+        MapFocus.FINAL -> listOfNotNull(here, finalDest)
         MapFocus.AUTO -> emptyList()
     }
     val manual = view != MapFocus.AUTO && viewPoints.isNotEmpty()
@@ -835,9 +845,13 @@ private fun NavigateMap(
             MapViewButton(Icons.Rounded.DirectionsBus, T("Show the bus", "הצג את האוטובוס"), view == MapFocus.BUS, bus != null) {
                 view = MapFocus.BUS; nonce++
             }
-            MapViewButton(Icons.Rounded.ZoomOutMap, T("Show me and the bus", "הצג אותי ואת האוטובוס"), view == MapFocus.BOTH,
-                here != null && bus != null) {
-                view = MapFocus.BOTH; nonce++
+            MapViewButton(Icons.Rounded.ZoomOutMap, T("Show me and where this step ends", "הצג אותי ואת סוף השלב"), view == MapFocus.NEXT,
+                here != null && stepEnd != null) {
+                view = MapFocus.NEXT; nonce++
+            }
+            MapViewButton(Icons.Rounded.Flag, T("Show me and the destination", "הצג אותי ואת היעד"), view == MapFocus.FINAL,
+                here != null && finalDest != null) {
+                view = MapFocus.FINAL; nonce++
             }
             if (view != MapFocus.AUTO) MapViewButton(Icons.Rounded.Close, T("Back to the trip view", "חזרה לתצוגת הנסיעה"), false, true) {
                 view = MapFocus.AUTO; nonce++
@@ -846,7 +860,7 @@ private fun NavigateMap(
     }
 }
 
-private enum class MapFocus { AUTO, ME, BUS, BOTH }
+private enum class MapFocus { AUTO, ME, BUS, NEXT, FINAL }
 
 @Composable
 private fun MapViewButton(
