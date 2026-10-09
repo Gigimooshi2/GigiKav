@@ -343,6 +343,17 @@ private fun Root() {
     val app = ctx.applicationContext
     val model: KavModel = viewModel { KavModel(Loaded.net, app) }
     LaunchedEffect(model) { if (!model.updateChecked) model.checkForUpdate(app) }
+    // Trip over while shown as a popup: show "Trip ended" for a moment, then close the popup.
+    val pipActivity = LocalContext.current as? android.app.Activity
+    LaunchedEffect(Pip.active, model.activeJourney == null) {
+        if (!Pip.active || model.activeJourney != null) return@LaunchedEffect
+        kotlinx.coroutines.delay(2500)
+        if (!Pip.active || model.activeJourney != null) return@LaunchedEffect
+        pipActivity?.moveTaskToBack(true)
+        kotlinx.coroutines.delay(800)
+        if (Pip.active) pipActivity?.finish()
+    }
+
     var pickLook by remember { mutableStateOf(Prefs.pickLook(ctx)) }
     var pickSupport by remember { mutableStateOf(Prefs.pickSupport(ctx)) }
     Box(Modifier.fillMaxSize()) {
