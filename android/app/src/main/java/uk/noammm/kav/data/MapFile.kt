@@ -16,7 +16,8 @@ import kotlinx.coroutines.launch
 
 object MapFile {
     const val TAG = "map-1"
-    const val URL = "https://github.com/${Updates.OWNER}/${Updates.REPO}/releases/download/$TAG/israel.pmtiles"
+    // The map lives on upstream Kav's releases (this fork only publishes APKs).
+    const val URL = "https://github.com/ImNoammm/kav/releases/download/$TAG/israel.pmtiles"
 
     const val BYTES = 185_001_087L
 
