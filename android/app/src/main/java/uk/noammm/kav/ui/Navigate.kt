@@ -695,9 +695,16 @@ private fun NavigateMap(
             else splitPath(route, off.first, off.second).first
         }
         .filter { it.size >= 2 }
+    val chosenRide = when (step) {
+        is Step.Wait -> boardingChoice(step.ride, step.wait, chosen[step.legIndex] ?: 0).first
+        is Step.Ride -> boardingChoice(step.ride, step.wait, chosen[step.legIndex] ?: 0).first
+        else -> null
+    }
     // A bus you're on may have dropped off its boarding stop's board; its prediction at your
     // get-off stop still carries where it is.
-    fun busOf(l: Moovit.Leg) = r.arrival(l)?.takeIf { it.hasLocation }
+    // On the ride step, follow the bus you're actually on (see myBus); otherwise the planned one.
+    fun busOf(l: Moovit.Leg) = (if (step is Step.Ride && l.tripId == chosenRide?.tripId) myBus(l, fix, now, r)?.takeIf { it.hasLocation } else null)
+        ?: r.arrival(l)?.takeIf { it.hasLocation }
         ?: r.live[Moovit.ArrivalKey(l.toStop, l.tripId)]?.takeIf { it.hasLocation }
     val vehicles = rideLegs.mapNotNull { busOf(it) }
     val vehicleModes = remember(rideLegs, r) {
@@ -711,11 +718,6 @@ private fun NavigateMap(
         rideStopPoints(rideLegsShapes, r.stops + stopNames)
     }
 
-    val chosenRide = when (step) {
-        is Step.Wait -> boardingChoice(step.ride, step.wait, chosen[step.legIndex] ?: 0).first
-        is Step.Ride -> boardingChoice(step.ride, step.wait, chosen[step.legIndex] ?: 0).first
-        else -> null
-    }
     val focusedVehicle = chosenRide?.let { busOf(it) }
     val chosenFocus = when (step) {
         is Step.Wait -> chosenRide?.shape?.take(1)

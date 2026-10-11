@@ -292,8 +292,27 @@ internal fun walkLeft(leg: Moovit.Leg, fix: Fix?, now: Long): Pair<Int, Int> {
  * 2. the bus's own live position along the route, 3. your phone's GPS along the route.
  * Null when none of them is available.
  */
+/**
+ * The bus you're actually on. The plan names one trip of the line, but with delays you can end up
+ * on an earlier or later one: when your GPS puts you on the route, take whichever bus of the same
+ * line Moovit sees within ~200 m of you (heading to your get-off stop). Otherwise the planned trip.
+ */
+internal fun myBus(ride: Moovit.Leg, fix: Fix?, now: Long, r: Moovit.Resolved?): Moovit.Arrival? {
+    val live = r?.live ?: return null
+    val planned = live[Moovit.ArrivalKey(ride.toStop, ride.tripId)]
+    val f = fix?.takeIf { it.isFresh(now) && it.aboard(ride.shape) } ?: return planned
+    val lines = ride.lineChoices.toSet() + ride.lineId
+    val near = live.values.filter { a ->
+        a.stopId == ride.toStop && a.lineId in lines && a.hasLocation && a.vehicleStatus != 2
+    }.minByOrNull { metres(it.lat, it.lon, f.lat, f.lon) }
+        ?.takeIf { metres(it.lat, it.lon, f.lat, f.lon) < 200 }
+    return near ?: planned?.takeIf { !it.hasLocation || metres(it.lat, it.lon, f.lat, f.lon) < 600 }
+}
+
 internal fun rideEta(ride: Moovit.Leg, fix: Fix?, now: Long, r: Moovit.Resolved? = null): Long? {
-    val atStop = r?.live?.get(Moovit.ArrivalKey(ride.toStop, ride.tripId))
+    // On the bus per GPS but no bus of the line near you: the planned trip's prediction is about
+    // a different bus, so it's skipped and your GPS position is used instead.
+    val atStop = myBus(ride, fix, now, r)
     atStop?.rtUtc?.takeIf { it > 0 && !atStop.rtDropped && it >= now - 60 }?.let { return it }
     val len = pathLength(ride.shape)
     if (len <= 0 || ride.arr <= ride.dep) return null
