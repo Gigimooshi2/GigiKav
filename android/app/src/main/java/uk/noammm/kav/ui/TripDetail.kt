@@ -567,7 +567,18 @@ private fun BoardOption(
                 }
             }
         }
-        val deps = r.departures(ride, wait).filter { it.timeUtc >= now - 60 }.take(3)
+        val past = ride.dep in 1 until now - 60
+        if (past) {
+            // Searched "Earlier": this bus has already gone, so its timetable times.
+            val hm = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+            val times = r.departures(ride, wait).map { it.timeUtc }.filter { it > 0 }.distinct().sorted().take(3)
+                .ifEmpty { listOf(ride.dep) }
+            Spacer(Modifier.height(K.gap2))
+            Text(T("Planned departures", "יציאות מתוכננות"), fontSize = 14.sp, color = K.dim)
+            Spacer(Modifier.height(K.gap1))
+            Text(times.joinToString("  ·  ") { hm.format(java.util.Date(it * 1000)) }, fontSize = 16.sp, color = K.text)
+        }
+        val deps = if (past) emptyList() else r.departures(ride, wait).filter { it.timeUtc >= now - 60 }.take(3)
         if (deps.isNotEmpty()) {
             Spacer(Modifier.height(K.gap2))
             Text(T("Departures", "יציאות"), fontSize = 14.sp, color = K.dim)

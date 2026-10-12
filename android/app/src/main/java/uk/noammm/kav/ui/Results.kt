@@ -561,8 +561,26 @@ private fun DepartureLine(it: Moovit.Itinerary, r: Moovit.Resolved, now: Long) {
     val deps = ride?.let { leg -> Moovit.boardingOptions(leg, wait).flatMap { (option, boarding) ->
         r.departures(option, boarding)
     } }.orEmpty()
-    val (labels, allMinutes) = departLabels(deps, now)
     val fare = if (it.fare >= 0) "%s%.2f".format(it.currency.ifBlank { "" }, it.fare / 100.0) else null
+    // A trip in the past ("Earlier"): its planned times, as clock times.
+    if (ride != null && ride.dep in 1 until now - 60) {
+        val hm = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+        val times = deps.map { d -> d.timeUtc }.filter { t -> t > 0 }.distinct().sorted().take(3)
+            .ifEmpty { listOf(ride.dep) }
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = K.dim)) { append(T("Planned ", "מתוכנן ")) }
+                withStyle(SpanStyle(color = K.text, fontWeight = FontWeight.Medium)) {
+                    append(times.joinToString(", ") { t -> hm.format(java.util.Date(t * 1000)) })
+                }
+                if (stop != null) withStyle(SpanStyle(color = K.dim)) { append(T(" from ", " מ־")); append(stop) }
+                if (fare != null) withStyle(SpanStyle(color = K.dim)) { append(" • $fare") }
+            },
+            fontSize = 13.sp, color = K.dim, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        )
+        return
+    }
+    val (labels, allMinutes) = departLabels(deps, now)
 
     if (labels.isEmpty() && stop == null && fare == null) return
     val lead = labels.firstOrNull()?.dep

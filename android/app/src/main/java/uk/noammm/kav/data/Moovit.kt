@@ -1002,6 +1002,9 @@ object Moovit {
             val alert = boarding?.alertCategory ?: 0
             val planned = (listOf(selected.copy(alert = alert)) + future.filter { it.tripId != ride.tripId })
                 .distinctBy { it.tripId to if (it.tripId == 0L) it.timeUtc else 0L }
+            // A ride that already left (searching "Earlier"): the stop's live board is about today's
+            // buses, not that one, so show the timetable times instead.
+            if (ride.dep in 1 until System.currentTimeMillis() / 1000 - 120) return planned.sortedBy { it.timeUtc }
             val current = liveFor(ride).map { it.departure(alert) }
             if (current.isNotEmpty()) return current
             return planned.sortedBy { it.timeUtc }
