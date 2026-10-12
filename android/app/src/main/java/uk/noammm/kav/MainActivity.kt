@@ -587,9 +587,16 @@ private fun Shell(model: KavModel) {
             delay(5_000)
         }
     }
-    LaunchedEffect(model.navigating, lifecycle) {
-        Pip.wanted = model.navigating
+    // No popup once you're on the last step (arrived) or the trip is gone: nothing left to follow.
+    val lastStep = remember(model.activeJourney?.trip) {
+        model.activeJourney?.let { j -> buildSteps(j.trip, j.fromLabel, j.toLabel).lastIndex }
+    }
+    val atArrival = lastStep == null || model.journeyStep >= lastStep
+    LaunchedEffect(model.navigating, atArrival) {
+        Pip.wanted = model.navigating && !atArrival
         (ctx as? MainActivity)?.updatePipParams()
+    }
+    LaunchedEffect(model.navigating, lifecycle) {
         if (!model.navigating) { model.heading = null; return@LaunchedEffect }
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             val stop = trackHeading(ctx) { model.heading = it }
