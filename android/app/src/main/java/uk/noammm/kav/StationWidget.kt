@@ -71,6 +71,8 @@ class StationWidget : AppWidgetProvider() {
         private fun ids(ctx: Context): IntArray =
             AppWidgetManager.getInstance(ctx).getAppWidgetIds(ComponentName(ctx, StationWidget::class.java))
 
+        fun liveIds(ctx: Context): List<Int> = runCatching { ids(ctx).filter { cfg(ctx, it)?.paused != true } }.getOrDefault(emptyList())
+
         fun refreshAll(ctx: Context) = runCatching { for (id in ids(ctx)) if (cfg(ctx, id)?.paused != true) refreshNow(ctx, id) }
 
         private val net = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
@@ -99,7 +101,7 @@ class StationWidget : AppWidgetProvider() {
             val saved = store(ctx).getString("rows_$id", null)?.let { runCatching { JSONObject(it) }.getOrNull() }
             v.setTextViewText(R.id.trip_title, if (c == null) T("Kav station", "תחנה ב-Kav") else T("Line ${c.line}", "קו ${c.line}"))
             v.setTextViewText(R.id.trip_sub, listOfNotNull(
-                c?.stopName,
+                c?.let { if (it.stopCode > 0) "${it.stopName} · ${it.stopCode}" else it.stopName },
                 saved?.optLong("at")?.takeIf { it > 0 }?.let {
                     (if (saved.optBoolean("offline")) T("offline · from ", "לא מחובר · מ-") else T("updated ", "עודכן ")) + hm.format(Date(it))
                 },
@@ -163,9 +165,14 @@ class StationWidgetRefresh : BroadcastReceiver() {
 
 class StationWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
-        val ctx = applicationContext
-        val id = inputData.getInt("id", -1).takeIf { it >= 0 } ?: return Result.success()
-        var c = StationWidget.cfg(ctx, id) ?: return Result.success()
+        val id = inputData.getInt("id", -1).takeIf { it >= 0 } ?: return true
+        return if (run(applicationContext, id, runAttemptCount)) Result.success() else Result.retry()
+    }
+
+    companion object {
+    /** Refresh one widget now. false = offline and worth retrying. Used by the worker and by the open app. */
+    suspend fun run(ctx: Context, id: Int, runAttemptCount: Int = 99): Boolean {
+        var c = StationWidget.cfg(ctx, id) ?: return true
         // Set up before stops were matched by code: re-match once (it may have been the opposite side).
         if (!c.byCode) runCatching {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -190,14 +197,14 @@ class StationWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWor
                 .put("error", T("No internet right now. Retrying…", "אין אינטרנט כרגע. מנסה שוב…"))
             StationWidget.store(ctx).edit().putString("rows_$id", o.toString()).apply()
             StationWidget.render(ctx, id)
-            return if (runAttemptCount < 4) Result.retry() else Result.success()
+            return runAttemptCount >= 4
         } catch (e: Exception) {
             android.util.Log.w("KavStationWidget", "refresh failed", e)
             JSONObject().put("at", System.currentTimeMillis()).put("error", e.message ?: T("Couldn't reach Moovit", "לא ניתן להגיע ל-Moovit"))
         }
         StationWidget.store(ctx).edit().putString("rows_$id", out.toString()).apply()
         StationWidget.render(ctx, id)
-        return Result.success()
+        return true
     }
 
     private suspend fun fetch(ctx: Context, c: StationWidget.Cfg): JSONArray = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -235,5 +242,6 @@ class StationWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWor
                     .put("to", names.getString("to_${a.lineId}", "").orEmpty().let { if (it.isBlank()) "" else T("to $it", "ל$it") }))
             }
         rows
+    }
     }
 }

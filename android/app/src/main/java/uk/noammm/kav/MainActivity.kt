@@ -53,11 +53,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
@@ -124,8 +126,23 @@ object PendingBackup {
 }
 
 class MainActivity : ComponentActivity() {
-    override fun onStart() { super.onStart(); AutoUpdate.visible = true }
+    // While Kav is open, refresh the home-screen widgets from here once a minute. Background refreshes
+    // can be blocked (Data saver / restricted background data); the open app has foreground access.
+    private var widgetJob: kotlinx.coroutines.Job? = null
+    override fun onStart() {
+        super.onStart()
+        AutoUpdate.visible = true
+        widgetJob?.cancel()
+        widgetJob = lifecycleScope.launch {
+            while (true) {
+                for (id in TripWidget.liveIds(this@MainActivity)) runCatching { TripWidgetWorker.run(this@MainActivity, id) }
+                for (id in StationWidget.liveIds(this@MainActivity)) runCatching { StationWidgetWorker.run(this@MainActivity, id) }
+                kotlinx.coroutines.delay(60_000)
+            }
+        }
+    }
     override fun onStop() {
+        widgetJob?.cancel(); widgetJob = null
         super.onStop()
         AutoUpdate.visible = false
         if (!isChangingConfigurations) { AutoUpdate.soon(this); TripWidget.refreshAll(this); StationWidget.refreshAll(this) }

@@ -82,6 +82,8 @@ class TripWidget : AppWidgetProvider() {
             AppWidgetManager.getInstance(ctx).getAppWidgetIds(ComponentName(ctx, TripWidget::class.java))
 
         /** Kav just went to the background: freshen every trip widget. */
+        fun liveIds(ctx: Context): List<Int> = runCatching { ids(ctx).filter { !cfg(ctx, it).paused } }.getOrDefault(emptyList())
+
         fun refreshAll(ctx: Context) = runCatching { for (id in ids(ctx)) if (!cfg(ctx, id).paused) refreshNow(ctx, id) }
 
         private val net = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
@@ -207,8 +209,13 @@ class TripWidgetRefresh : BroadcastReceiver() {
 
 class TripWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
-        val ctx = applicationContext
-        val id = inputData.getInt("id", -1).takeIf { it >= 0 } ?: return Result.success()
+        val id = inputData.getInt("id", -1).takeIf { it >= 0 } ?: return true
+        return if (run(applicationContext, id, runAttemptCount)) Result.success() else Result.retry()
+    }
+
+    companion object {
+    /** Refresh one widget now. false = offline and worth retrying. Used by the worker and by the open app. */
+    suspend fun run(ctx: Context, id: Int, runAttemptCount: Int = 99): Boolean {
         val prev = TripWidget.store(ctx).getString("rows_$id", null)?.let { runCatching { JSONObject(it) }.getOrNull() }
         val out = try {
             JSONObject().put("at", System.currentTimeMillis()).put("rows", fetch(ctx, id))
@@ -223,14 +230,14 @@ class TripWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
                 .put("error", T("No internet right now. Retrying…", "אין אינטרנט כרגע. מנסה שוב…"))
             TripWidget.store(ctx).edit().putString("rows_$id", o.toString()).apply()
             TripWidget.render(ctx, id)
-            return if (runAttemptCount < 4) Result.retry() else Result.success()
+            return runAttemptCount >= 4
         } catch (e: Exception) {
             android.util.Log.w("KavTripWidget", "refresh failed", e)
             JSONObject().put("at", System.currentTimeMillis()).put("error", e.message ?: T("Couldn't reach Moovit", "לא ניתן להגיע ל-Moovit"))
         }
         TripWidget.store(ctx).edit().putString("rows_$id", out.toString()).apply()
         TripWidget.render(ctx, id)
-        return Result.success()
+        return true
     }
 
     private suspend fun fetch(ctx: Context, id: Int): JSONArray {
@@ -304,5 +311,6 @@ class TripWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
         }
         return TripWidget.savedHere(ctx)?.takeIf { System.currentTimeMillis() - it.third < 6 * 3_600_000L }
             ?.let { it.first to it.second }
+    }
     }
 }
