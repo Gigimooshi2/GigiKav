@@ -165,7 +165,7 @@ class StationWidgetRefresh : BroadcastReceiver() {
 
 class StationWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
-        val id = inputData.getInt("id", -1).takeIf { it >= 0 } ?: return true
+        val id = inputData.getInt("id", -1).takeIf { it >= 0 } ?: return Result.success()
         return if (run(applicationContext, id, runAttemptCount)) Result.success() else Result.retry()
     }
 
