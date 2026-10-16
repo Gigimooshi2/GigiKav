@@ -165,7 +165,7 @@ private fun pipCells(
             else -> null
         }
         val label = T("Get off", "ירידה") + (left?.let { l ->
-            " · " + when (l) { 0 -> T("next", "הבאה"); 1 -> T("1 stop", "תחנה 1"); else -> T("$l stops", "$l תחנות") }
+            " · " + when (l) { 0 -> T("here", "כאן"); 1 -> T("next stop", "התחנה הבאה"); else -> T("$l stops", "$l תחנות") }
         } ?: "")
         out.add(PipCell(label, (if (gps == null) "~" else "") + until(gps ?: ride.arr)))
     }
