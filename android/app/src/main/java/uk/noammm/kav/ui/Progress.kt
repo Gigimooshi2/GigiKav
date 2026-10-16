@@ -293,21 +293,32 @@ internal fun walkLeft(leg: Moovit.Leg, fix: Fix?, now: Long): Pair<Int, Int> {
  * Null when none of them is available.
  */
 /**
- * The bus you're actually on. The plan names one trip of the line, but with delays you can end up
- * on an earlier or later one: when your GPS puts you on the route, take whichever bus of the same
- * line Moovit sees within ~200 m of you (heading to your get-off stop). Otherwise the planned trip.
+ * The bus you're actually on. Usually the planned trip; but delays can put you on an earlier or
+ * later bus of the same line. Rules, so it doesn't flip between buses bunched together:
+ * 1. The planned bus wins if it's within 500 m of you (its position updates lag ~30 s).
+ * 2. Otherwise the bus of the same line closest to you, within 200 m, heading to your stop.
+ * 3. Once picked, an unplanned bus is kept while it stays within 500 m of you.
  */
 internal fun myBus(ride: Moovit.Leg, fix: Fix?, now: Long, r: Moovit.Resolved?): Moovit.Arrival? {
     val live = r?.live ?: return null
     val planned = live[Moovit.ArrivalKey(ride.toStop, ride.tripId)]
     val f = fix?.takeIf { it.isFresh(now) && it.aboard(ride.shape) } ?: return planned
+    fun dist(a: Moovit.Arrival) = metres(a.lat, a.lon, f.lat, f.lon)
+    if (planned != null && (!planned.hasLocation || dist(planned) < 500)) { MyBus.picked.remove(ride.tripId); return planned }
     val lines = ride.lineChoices.toSet() + ride.lineId
-    val near = live.values.filter { a ->
+    val candidates = live.values.filter { a ->
         a.stopId == ride.toStop && a.lineId in lines && a.hasLocation && a.vehicleStatus != 2
-    }.minByOrNull { metres(it.lat, it.lon, f.lat, f.lon) }
-        ?.takeIf { metres(it.lat, it.lon, f.lat, f.lon) < 200 }
-    return near ?: planned?.takeIf { !it.hasLocation || metres(it.lat, it.lon, f.lat, f.lon) < 600 }
+    }
+    MyBus.picked[ride.tripId]?.let { kept ->
+        candidates.firstOrNull { it.tripId == kept && dist(it) < 500 }?.let { return it }
+    }
+    val near = candidates.minByOrNull { dist(it) }?.takeIf { dist(it) < 200 }
+    if (near != null) { MyBus.picked[ride.tripId] = near.tripId; return near }
+    return planned?.takeIf { !it.hasLocation || dist(it) < 600 }
 }
+
+/** Remembers, per planned trip, which other bus of the line you turned out to be on. */
+private object MyBus { val picked = HashMap<Long, Long>() }
 
 internal fun rideEta(ride: Moovit.Leg, fix: Fix?, now: Long, r: Moovit.Resolved? = null): Long? {
     // On the bus per GPS but no bus of the line near you: the planned trip's prediction is about
