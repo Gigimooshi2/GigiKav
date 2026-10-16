@@ -677,7 +677,8 @@ fun TileMap(
                         camera.gesture(centroid, panChange, zoomChange, twist, liveViewport)
                     }
                 }
-                // Like other maps: double-tap zooms in; double-tap, hold and drag down/up zooms in/out.
+                // Like other maps: double-tap zooms in (around the tap); double-tap, hold and drag
+                // down/up zooms in/out (around the centre).
                 // Sits inside the pan/zoom handler so it sees moves first and can claim them.
                 .pointerInput(camera) {
                     awaitEachGesture {
@@ -699,7 +700,8 @@ fun TileMap(
                             if (dragging) {
                                 val dy = ch.position.y - lastY
                                 lastY = ch.position.y
-                                if (dy != 0f) camera.gesture(pivot, Offset.Zero, kotlin.math.exp(dy / 220f), 0f, liveViewport)
+                                // Drag-zoom pivots on the map's centre, not the finger.
+                                if (dy != 0f) camera.gesture(liveViewport.anchor, Offset.Zero, kotlin.math.exp(dy / 220f), 0f, liveViewport)
                                 ch.consume()
                             }
                         }
