@@ -52,7 +52,12 @@ fun PipOverlay(model: KavModel) {
         val waitTint = waitDep?.takeIf { it.state != Moovit.TimeState.STATIC && it.state != Moovit.TimeState.STATISTICAL }
             ?.let { depColour(it) }
         val waitLive = waitDep?.live == true
-        val cells = pipCells(steps, index, journey, model.fix, now)
+        // On a bus: the stops along it (names and places), for counting how many are left.
+        val rideStops = (steps[index] as? Step.Ride)?.let { st ->
+            boardingChoice(st.ride, st.wait, journey.chosen[st.legIndex] ?: 0).first.stops
+        }.orEmpty()
+        val stopNames = journey.resolved.stops + rememberStopNames(rideStops)
+        val cells = pipCells(steps, index, journey, model.fix, now, stopNames)
         val showDetail = cells.isEmpty() || steps[index] !is Step.Walk
         Row(Modifier.fillMaxSize().padding(horizontal = K.gap3, vertical = K.gap2), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(4.dp).fillMaxHeight(.7f).clip(RoundedCornerShape(999.dp)).background(K.accent))
@@ -121,7 +126,10 @@ private class PipCell(val label: String, val value: String, val tint: androidx.c
 private fun depTintOrNull(d: Moovit.Departure) =
     if (d.state == Moovit.TimeState.STATIC || d.state == Moovit.TimeState.STATISTICAL) null else depColour(d)
 
-private fun pipCells(steps: List<Step>, index: Int, journey: ActiveJourney, fix: Fix?, now: Long): List<PipCell> {
+private fun pipCells(
+    steps: List<Step>, index: Int, journey: ActiveJourney, fix: Fix?, now: Long,
+    names: Map<Int, Moovit.StopInfo> = emptyMap(),
+): List<PipCell> {
     val r = journey.resolved
     val step = steps[index]
     if (step !is Step.Start && step !is Step.Walk && step !is Step.Ride) return emptyList()
@@ -143,7 +151,23 @@ private fun pipCells(steps: List<Step>, index: Int, journey: ActiveJourney, fix:
     if (step is Step.Ride) {
         val ride = boardingChoice(step.ride, step.wait, journey.chosen[step.legIndex] ?: 0).first
         val gps = rideEta(ride, fix, now, r)
-        out.add(PipCell(T("Get off", "ירידה"), (if (gps == null) "~" else "") + until(gps ?: ride.arr)))
+        // Stops left: counted from where you are on the route; if that can't be placed, from the
+        // estimated time left; else the whole ride.
+        val n = ride.stops.size
+        val aboard = fix?.let { it.isFresh(now) && it.aboard(ride.shape) } == true
+        val progress = if (aboard) stopsProgress(ride, names, r.arrival(ride), fix, now) else -1f
+        val left = when {
+            n < 2 -> null
+            progress >= 1f -> (n - progress.toInt()).coerceIn(0, n - 1)
+            gps != null && ride.arr > ride.dep ->
+                kotlin.math.ceil((gps - now).toDouble() / (ride.arr - ride.dep) * (n - 1)).toInt().coerceIn(0, n - 1)
+            now < ride.dep -> n - 1
+            else -> null
+        }
+        val label = T("Get off", "ירידה") + (left?.let { l ->
+            " · " + when (l) { 0 -> T("next", "הבאה"); 1 -> T("1 stop", "תחנה 1"); else -> T("$l stops", "$l תחנות") }
+        } ?: "")
+        out.add(PipCell(label, (if (gps == null) "~" else "") + until(gps ?: ride.arr)))
     }
 
     // Next boarding after this step (or after the Start/Walk that leads to it)
