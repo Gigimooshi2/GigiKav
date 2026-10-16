@@ -7,6 +7,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -672,6 +675,35 @@ fun TileMap(
                 .pointerInput(camera) {
                     detectTransformGestures(panZoomLock = true) { centroid, panChange, zoomChange, twist ->
                         camera.gesture(centroid, panChange, zoomChange, twist, liveViewport)
+                    }
+                }
+                // Like other maps: double-tap zooms in; double-tap, hold and drag down/up zooms in/out.
+                // Sits inside the pan/zoom handler so it sees moves first and can claim them.
+                .pointerInput(camera) {
+                    awaitEachGesture {
+                        val first = awaitFirstDown(requireUnconsumed = false)
+                        waitForUpOrCancellation() ?: return@awaitEachGesture
+                        val second = withTimeoutOrNull(viewConfiguration.doubleTapTimeoutMillis) {
+                            awaitFirstDown(requireUnconsumed = false)
+                        } ?: return@awaitEachGesture
+                        if ((second.position - first.position).getDistance() > viewConfiguration.touchSlop * 4) return@awaitEachGesture
+                        val pivot = second.position
+                        var lastY = pivot.y
+                        var dragging = false
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.changes.size > 1) return@awaitEachGesture   // a pinch: leave it to pan/zoom
+                            val ch = event.changes.firstOrNull { it.id == second.id } ?: break
+                            if (!ch.pressed) break
+                            if (!dragging && kotlin.math.abs(ch.position.y - pivot.y) > viewConfiguration.touchSlop) dragging = true
+                            if (dragging) {
+                                val dy = ch.position.y - lastY
+                                lastY = ch.position.y
+                                if (dy != 0f) camera.gesture(pivot, Offset.Zero, kotlin.math.exp(dy / 220f), 0f, liveViewport)
+                                ch.consume()
+                            }
+                        }
+                        if (!dragging) camera.gesture(pivot, Offset.Zero, 2f, 0f, liveViewport)
                     }
                 },
         )
