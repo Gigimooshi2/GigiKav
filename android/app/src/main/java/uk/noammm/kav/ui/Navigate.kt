@@ -273,7 +273,21 @@ fun NavigateScreen(
                     verticalAlignment = Alignment.Bottom,
                     beyondViewportPageCount = 1,
                 ) { page ->
-                    Box(Modifier.fillMaxWidth().onSizeChanged { pageHeights[page] = it.height }.animateContentSize()) {
+                    Column(Modifier.fillMaxWidth().onSizeChanged { pageHeights[page] = it.height }.animateContentSize()) {
+                        // GPS can't always tell where you are (underground rail, tunnels): looking at
+                        // another step, one tap makes it the current one, and everything follows it.
+                        if (page != currentStep && journey != null) Row(
+                            Modifier.fillMaxWidth().padding(bottom = K.gap2),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            Text(
+                                T("I'm here", "אני כאן"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                color = K.onAccent,
+                                modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(K.accent)
+                                    .clickable(role = Role.Button) { model.journeyStep = page }
+                                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                            )
+                        }
                         StepCard(
                             steps[page], r, active = page == currentStep, now = now,
                             chosen = chosen, fix = fix,
