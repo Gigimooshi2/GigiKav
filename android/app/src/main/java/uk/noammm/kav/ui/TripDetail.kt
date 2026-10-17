@@ -567,7 +567,7 @@ private fun BoardOption(
                 }
             }
         }
-        val past = ride.dep in 1 until now - 60
+        val past = r.gone(ride)
         if (past) {
             // Searched "Earlier": this bus has already gone, so its timetable times.
             val hm = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)

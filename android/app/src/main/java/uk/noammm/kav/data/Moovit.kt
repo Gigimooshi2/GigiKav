@@ -982,6 +982,13 @@ object Moovit {
     ) {
         fun arrival(ride: Leg): Arrival? = live[ArrivalKey(ride.fromStop, ride.tripId)]
 
+        /**
+         * The bus has truly gone (an "Earlier" search): planned time over 2 min ago and the stop's live
+         * board doesn't have it. A late bus is still on the board, so it never counts as gone.
+         */
+        fun gone(ride: Leg): Boolean =
+            ride.dep in 1 until System.currentTimeMillis() / 1000 - 120 && liveFor(ride).none { it.tripId == ride.tripId }
+
         fun liveFor(ride: Leg): List<Arrival> = live.values.filter { a ->
             a.stopId == ride.fromStop && a.lineId == ride.lineId &&
                 patterns[a.patternId]?.contains(ride.toStop) == true
@@ -1004,7 +1011,7 @@ object Moovit {
                 .distinctBy { it.tripId to if (it.tripId == 0L) it.timeUtc else 0L }
             // A ride that already left (searching "Earlier"): the stop's live board is about today's
             // buses, not that one, so show the timetable times instead.
-            if (ride.dep in 1 until System.currentTimeMillis() / 1000 - 120) return planned.sortedBy { it.timeUtc }
+            if (gone(ride)) return planned.sortedBy { it.timeUtc }
             val current = liveFor(ride).map { it.departure(alert) }
             if (current.isNotEmpty()) return current
             return planned.sortedBy { it.timeUtc }

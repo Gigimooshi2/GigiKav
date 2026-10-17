@@ -563,7 +563,7 @@ private fun DepartureLine(it: Moovit.Itinerary, r: Moovit.Resolved, now: Long) {
     } }.orEmpty()
     val fare = if (it.fare >= 0) "%s%.2f".format(it.currency.ifBlank { "" }, it.fare / 100.0) else null
     // A trip in the past ("Earlier"): its planned times, as clock times.
-    if (ride != null && ride.dep in 1 until now - 60) {
+    if (ride != null && r.gone(ride)) {
         val hm = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
         val times = deps.map { d -> d.timeUtc }.filter { t -> t > 0 }.distinct().sorted().take(3)
             .ifEmpty { listOf(ride.dep) }
