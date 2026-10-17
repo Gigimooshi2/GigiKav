@@ -69,6 +69,9 @@ internal sealed class Step {
     class Walk(
         val leg: Moovit.Leg, val toStop: Int, val toRide: Moovit.Leg?,
         override val focus: List<Pair<Double, Double>>,
+        /** Where this walk comes out of a station / goes into one (the station door), if it does. */
+        val exitAt: Pair<Double, Double>? = null,
+        val enterAt: Pair<Double, Double>? = null,
     ) : Step()
     class Wait(
         val ride: Moovit.Leg, val wait: Moovit.Leg?, val legIndex: Int,
@@ -109,7 +112,10 @@ internal fun buildSteps(trip: Moovit.Itinerary, fromLabel: String, toLabel: Stri
                 )
                 val boards = all.drop(j).firstOrNull { it.kind != Moovit.LegKind.WAIT }
                     ?.takeIf { it.kind == Moovit.LegKind.RIDE }
-                out.add(Step.Walk(merged, merged.toStop, boards, merged.shape.ifEmpty { whole }))
+                val range = all.subList(i, j)
+                val exitAt = if (range.first().pathway) range.firstOrNull { !it.pathway }?.shape?.firstOrNull() else null
+                val enterAt = if (range.last().pathway) range.lastOrNull { !it.pathway }?.shape?.lastOrNull() else null
+                out.add(Step.Walk(merged, merged.toStop, boards, merged.shape.ifEmpty { whole }, exitAt, enterAt))
             }
             Moovit.LegKind.RIDE -> {
                 val wait = all.getOrNull(i - 1)?.takeIf { it.kind == Moovit.LegKind.WAIT }
@@ -391,6 +397,25 @@ internal fun StepCard(
                 active,
                 trailing = if (leftM > 0) distanceLabel(leftM.toDouble()) else null,
             ) {
+                // Which station door: out of the station you just rode to, or into the one you're heading for.
+                val door = step.exitAt ?: step.enterAt
+                if (door != null) {
+                    val ctx = androidx.compose.ui.platform.LocalContext.current
+                    LaunchedEffect(door) { uk.noammm.kav.data.StationDoors.lookup(ctx, door) }
+                    uk.noammm.kav.data.StationDoors.label(door)?.let { name ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = K.gap2)) {
+                            Icon(
+                                if (step.exitAt != null) Icons.AutoMirrored.Rounded.Logout else Icons.AutoMirrored.Rounded.Login,
+                                null, tint = K.accent, modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(K.gap2))
+                            Text(
+                                (if (step.exitAt != null) T("Leave the station by ", "צאו מהתחנה דרך ") else T("Enter the station by ", "היכנסו לתחנה דרך ")) + name,
+                                fontSize = 14.sp, color = K.text, fontWeight = FontWeight.Medium,
+                            )
+                        }
+                    }
+                }
                 StopLine(
                     stop?.name ?: T("your stop", "התחנה שלכם"), stop?.code,
                     step.toRide?.let { legMode(it, r) },

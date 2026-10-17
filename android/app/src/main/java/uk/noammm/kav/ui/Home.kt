@@ -281,7 +281,11 @@ internal fun stepInstruction(step: Step, journey: ActiveJourney, lastLeg: Boolea
         is Step.Start -> T("Leave at ${time(step.time)}", "יציאה בשעה ${time(step.time)}") to T("Start from ${step.label}", "התחלה מ${step.label}")
         is Step.Walk -> {
             val (m, min) = walkLeft(step.leg, fix, now)
+            val door = uk.noammm.kav.data.StationDoors.label(step.exitAt ?: step.enterAt)?.let {
+                if (step.exitAt != null) T("exit $it", "יציאה $it") else T("enter $it", "כניסה $it")
+            }
             T("Walk to ${nextStop(step.toStop)}", "הליכה אל ${nextStop(step.toStop)}") to listOfNotNull(
+                door,
                 T("$min min", "$min דק׳").takeIf { min > 0 },
                 distanceLabel(m.toDouble()).takeIf { m > 0 },
             ).joinToString(" · ").ifBlank { T("Follow the walking route.", "עקבו אחרי מסלול ההליכה.") }
