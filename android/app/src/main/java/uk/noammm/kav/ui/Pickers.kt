@@ -52,6 +52,7 @@ fun KavField(
     modifier: Modifier = Modifier,
     autoFocus: Boolean = false,
 ) {
+    if (Mv.on) return MvSearchField(value, onValue, placeholder, modifier, autoFocus)
     val focus = remember { FocusRequester() }
     LaunchedEffect(autoFocus) { if (autoFocus) runCatching { focus.requestFocus() } }
     BasicTextField(
@@ -82,11 +83,12 @@ fun StopRow(net: Net, stop: Int, trailing: String? = null, leading: (@Composable
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = K.gap1)
-            .heightIn(min = 48.dp)
-            .panel(K.rControl)
+            // Moovit: flat white rows with a hairline between them.
+            .then(if (Mv.on) Modifier.mvRow(inset = 68.dp) else Modifier.padding(vertical = K.gap1))
+            .heightIn(min = if (Mv.on) 64.dp else 48.dp)
+            .then(if (Mv.on) Modifier else Modifier.panel(K.rControl))
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = K.gap3, vertical = 11.dp),
+            .padding(horizontal = if (Mv.on) K.gap4 else K.gap3, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) {
@@ -245,12 +247,14 @@ fun PlacePicker(
 
     Box(Modifier.fillMaxSize().background(K.bg)) {
     FloatingTop(top = {
+        CompositionLocalProvider(LocalOnBar provides Mv.on) {
         Row(
-            Modifier.fillMaxWidth().padding(K.gap3).heightIn(min = 48.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(K.gap2),
+            Modifier.fillMaxWidth().then(if (Mv.on) Modifier.background(Mv.bar).padding(end = K.gap3, top = K.gap2, bottom = K.gap2, start = 4.dp) else Modifier.padding(K.gap3)).heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (Mv.on) 4.dp else K.gap2),
         ) {
             BackButton(leave)
             KavField(q, onQuery, setting?.let { T("where is ${it.label}?", "היכן נמצא ${it.label}?") } ?: title, Modifier.weight(1f), autoFocus = true)
+        }
         }
     }, estimate = 72.dp) { topSpace, backdrop ->
     LazyColumn(
@@ -402,6 +406,18 @@ fun PlacePicker(
 
 @Composable
 internal fun SelectOnMapRow(sides: androidx.compose.ui.unit.Dp = K.gap3, onClick: () -> Unit) {
+    if (Mv.on) return Row(
+        Modifier.fillMaxWidth().mvRow().heightIn(min = 56.dp)
+            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = K.gap4),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(K.gap4),
+    ) {
+        Canvas(Modifier.size(20.dp)) {
+            val w = size.width
+            drawCircle(Mv.link, w * .30f, Offset(w * .5f, w * .38f), style = Stroke(w * .11f))
+            drawLine(Mv.link, Offset(w * .5f, w * .68f), Offset(w * .5f, w * .98f), w * .11f, StrokeCap.Round)
+        }
+        Text(T("Select on map", "בחירה על המפה"), fontSize = 16.sp, color = Mv.link, fontWeight = FontWeight.Medium)
+    }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = sides)
             .heightIn(min = 48.dp).glassSurface(24.dp)
@@ -626,6 +642,7 @@ private fun StopMapBody(
 
 @Composable
 private fun SectionTitle(text: String) {
+    if (Mv.on) return Box(Modifier.padding(top = K.gap2)) { MvSection(text) }
     Text(
         text, fontSize = 14.sp, color = K.dim,
         modifier = Modifier.padding(start = K.gap2, end = K.gap1, top = K.gap2, bottom = K.gap1),
@@ -635,7 +652,8 @@ private fun SectionTitle(text: String) {
 @Composable
 private fun PlaceRow(p: Moovit.Place, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = K.gap1).heightIn(min = 48.dp).panel(K.rControl)
+        Modifier.fillMaxWidth()
+            .then(if (Mv.on) Modifier.mvRow(inset = 72.dp).heightIn(min = 60.dp) else Modifier.padding(vertical = K.gap1).heightIn(min = 48.dp).panel(K.rControl))
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = K.gap3, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,

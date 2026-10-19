@@ -96,7 +96,11 @@ private fun LineList(model: KavModel, net: Net) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(T("Browse the", "עיינו"), T("lines", "בקווים"))
+        // Moovit: search and the mode tabs live in the charcoal header.
+        if (Mv.on) MvSearchHeader(T("Lines", "קווים"), q, { q = it }, T("Search for a line", "חיפוש קו")) {
+            MvTabs(FILTERS.map { filterLabel(it.first) }, FILTERS.indexOfFirst { it.second === types }) { types = FILTERS[it].second }
+        }
+        else ScreenHeader(T("Browse the", "עיינו"), T("lines", "בקווים"))
         val listState = rememberLazyListState()
         var scrolled by remember(net) { mutableStateOf(false) }
         LaunchedEffect(listState) {
@@ -104,10 +108,11 @@ private fun LineList(model: KavModel, net: Net) {
         }
         LaunchedEffect(lead) { if (lead.isNotEmpty() && !scrolled) listState.scrollToItem(0) }
         Box(Modifier.fillMaxSize()) {
+        val side = if (Mv.on) 0.dp else K.gap2
         LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(
-            start = K.gap2, end = K.gap2, bottom = LocalBottomBarInset.current,
+            start = side, end = side, bottom = LocalBottomBarInset.current,
         )) {
-            item(key = "search") {
+            if (!Mv.on) item(key = "search") {
                 Column {
                     KavField(q, { q = it }, T("line number or name…", "מספר או שם קו…"), Modifier.padding(horizontal = K.gap1).fillMaxWidth())
                     Spacer(Modifier.height(K.gap2))
@@ -123,7 +128,7 @@ private fun LineList(model: KavModel, net: Net) {
                     Spacer(Modifier.height(K.gap3))
                 }
             }
-            item(key = "count") {
+            if (!Mv.on) item(key = "count") {
                 val total = sections.sumOf { it.second.size }
                 Text(
                     T("$total lines · choose a line to see its stops", "$total קווים · בחרו קו כדי לראות את התחנות שלו"),
@@ -142,7 +147,7 @@ private fun LineList(model: KavModel, net: Net) {
                 items(rows, key = { it.route }) { row -> LineRowCard(model, net, row) }
             }
         }
-        ScrollEdge(listState.canScrollBackward)
+        if (!Mv.on) ScrollEdge(listState.canScrollBackward)
         }
     }
 }
@@ -157,6 +162,7 @@ private fun Modifier.bleed(by: androidx.compose.ui.unit.Dp): Modifier = layout {
 
 @Composable
 private fun SectionLabel(label: String) {
+    if (Mv.on) return MvSection(label)
     Text(
         label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = K.dim,
         modifier = Modifier.padding(start = K.gap2, end = K.gap2, top = K.gap3, bottom = K.gap1),
@@ -165,6 +171,17 @@ private fun SectionLabel(label: String) {
 
 @Composable
 private fun LineRowCard(model: KavModel, net: Net, row: LineRow) {
+    // Moovit: a flat row, the underlined badge, where the line runs, a chevron.
+    if (Mv.on) return Row(
+        Modifier.fillMaxWidth().mvRow().clickable { model.lineRoute = row.route }
+            .heightIn(min = 64.dp).padding(horizontal = K.gap4, vertical = K.gap3),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(K.gap3),
+    ) {
+        Box(Modifier.widthIn(min = 64.dp)) { LineBadge(net, row.route) }
+        LineSpan(net, row, Modifier.weight(1f))
+        Text(T.onward, fontSize = 22.sp, color = K.dim)
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -362,7 +379,13 @@ internal fun LineDetail(model: KavModel, net: Net, route: Int, onBack: () -> Uni
     }
 
     Column(Modifier.fillMaxSize().background(K.bg)) {
-        ScreenHeader(T("Line", "קו"), net.rShort[route], back = onBack)
+        if (Mv.on) MvTopBar(operatorLabel(net.agencyOf(route)).ifBlank { typeName(net.rType[route]) }, onBack, lead = { LineBadge(net, route) })
+        else ScreenHeader(T("Line", "קו"), net.rShort[route], back = onBack)
+        if (Mv.on) Column(Modifier.fillMaxWidth().background(K.surface1).padding(horizontal = K.gap4, vertical = K.gap3)) {
+            Text(T("Direction", "כיוון"), fontSize = 13.sp, color = K.dim)
+            Spacer(Modifier.height(K.gap1))
+            LineDirection(net, stops?.takeIf { it.isNotEmpty() }?.let { it.first() to it.last() })
+        } else
         Row(
             Modifier.padding(horizontal = K.gap4).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -376,7 +399,8 @@ internal fun LineDetail(model: KavModel, net: Net, route: Int, onBack: () -> Uni
             val live = rememberLineLive(net, route, list)
             LineMap(
                 net, route, list, live,
-                Modifier.padding(horizontal = K.gap3).padding(top = K.gap3).fillMaxWidth().height(210.dp).panel(K.rCard),
+                if (Mv.on) Modifier.fillMaxWidth().height(210.dp)
+                else Modifier.padding(horizontal = K.gap3).padding(top = K.gap3).fillMaxWidth().height(210.dp).panel(K.rCard),
             )
             val next = remember(route) { nextStart(net, route) }?.let { (t, at) ->
                 val from = net.name[net.stStop[net.tripStart[t]]]
@@ -392,20 +416,25 @@ internal fun LineDetail(model: KavModel, net: Net, route: Int, onBack: () -> Uni
             modifier = Modifier.padding(horizontal = K.gap4, vertical = K.gap2),
         )
         if (list != null) {
+            val side = if (Mv.on) 0.dp else K.gap2
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(
-                start = K.gap2, end = K.gap2, bottom = LocalBottomBarInset.current,
+                start = side, end = side, bottom = LocalBottomBarInset.current,
             )) {
                 items(list.size) { i ->
                     val s = list[i]
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .then(if (Mv.on) Modifier.height(IntrinsicSize.Min).mvRow(inset = 46.dp) else Modifier.clip(RoundedCornerShape(10.dp)))
                             .clickable { model.stationStop = s; model.tab = uk.noammm.kav.Tab.Stations }
                             .padding(horizontal = K.gap3, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(Modifier.width(18.dp), contentAlignment = Alignment.Center) {
+                        if (Mv.on) MvStopDot(
+                            mvLineColour(net.rType[route], -1, net.agencyOf(route)),
+                            first = i == 0, last = i == list.lastIndex,
+                        )
+                        else Box(Modifier.width(18.dp), contentAlignment = Alignment.Center) {
                             Box(
                                 Modifier.size(7.dp)
                                     .clip(RoundedCornerShape(999.dp))

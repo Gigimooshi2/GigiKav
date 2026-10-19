@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,6 +74,7 @@ internal fun ClockGlyph(tint: Color = K.muted, size: androidx.compose.ui.unit.Dp
 
 @Composable
 fun LiveGlyph(tint: Color = K.live, size: androidx.compose.ui.unit.Dp = 11.dp) {
+    if (Mv.on) return Canvas(Modifier.size(size)) { drawMvLive(tint) }
     Canvas(Modifier.size(size)) {
         val w = this.size.width; val h = this.size.height; val sw = w * .11f
         drawCircle(tint, w * .13f, Offset(w * .24f, h * .80f))
@@ -182,6 +184,7 @@ fun PlanHeader(
     onAddStop: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
 ) {
+    if (Mv.on) return MvPlanHeader(from, to, fromIsHere, toIsHere, onFrom, onTo, onSwap, onAddStop, onBack)
     Column(Modifier.fillMaxWidth().padding(horizontal = K.gap3, vertical = K.gap2)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (onBack != null) { BackButton(onBack); Spacer(Modifier.width(K.gap2)) }
@@ -202,6 +205,61 @@ fun PlanHeader(
                 ) { PlusGlyph() }
             }
         }
+    }
+}
+
+/** Moovit's plan header: two white fields on the charcoal bar, swap at the end. */
+@Composable
+private fun MvPlanHeader(
+    from: String, to: String, fromIsHere: Boolean, toIsHere: Boolean,
+    onFrom: () -> Unit, onTo: () -> Unit, onSwap: () -> Unit,
+    onAddStop: (() -> Unit)?, onBack: (() -> Unit)?,
+) {
+    CompositionLocalProvider(LocalOnBar provides true) {
+        Row(
+            Modifier.fillMaxWidth().background(Mv.bar).padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = K.gap2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (onBack != null) MvIconButton(T("Back", "חזרה"), onBack) { MvBackArrow(Color.White) }
+            else Spacer(Modifier.width(K.gap3))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(K.gap2)) {
+                MvEndpoint(from, here = fromIsHere, start = true, onClick = onFrom)
+                MvEndpoint(to, here = toIsHere, start = false, onClick = onTo)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                MvIconButton(T("Swap start and destination", "החלפת התחלה ויעד"), onSwap) {
+                    Canvas(Modifier.size(20.dp)) {
+                        val w = size.width; val h = size.height; val sw = w * .09f
+                        fun l(x1: Float, y1: Float, x2: Float, y2: Float) =
+                            drawLine(Color.White, Offset(x1 * w, y1 * h), Offset(x2 * w, y2 * h), sw, StrokeCap.Round)
+                        l(.32f, .12f, .32f, .88f); l(.14f, .70f, .32f, .88f); l(.50f, .70f, .32f, .88f)
+                        l(.68f, .88f, .68f, .12f); l(.50f, .30f, .68f, .12f); l(.86f, .30f, .68f, .12f)
+                    }
+                }
+                if (onAddStop != null) MvIconButton(T("Add stop", "הוספת תחנה"), onAddStop) { PlusGlyph(Color.White) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MvEndpoint(label: String, here: Boolean, start: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(6.dp)).background(Mv.field)
+            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Canvas(Modifier.size(12.dp)) {
+            val w = size.width
+            if (start) drawCircle(Mv.fieldHint, w * .36f, Offset(w * .5f, w * .5f), style = Stroke(w * .16f))
+            else drawCircle(Mv.orange, w * .44f, Offset(w * .5f, w * .5f))
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            label, fontSize = 15.sp,
+            color = if (here) Mv.link else if (label.endsWith("…")) Mv.fieldHint else Mv.fieldInk,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -249,6 +307,16 @@ private fun Endpoint(label: String, here: Boolean, dot: Boolean, onClick: () -> 
 
 @Composable
 fun DepartRow(label: String, onWhen: () -> Unit, order: String, onOrder: () -> Unit) {
+    if (Mv.on) return CompositionLocalProvider(LocalOnBar provides true) {
+        Row(
+            Modifier.fillMaxWidth().background(Mv.bar).padding(start = 52.dp, end = K.gap3, bottom = K.gap3),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(K.gap2),
+        ) {
+            MenuPill(label, onWhen)
+            MenuPill(order, onOrder)
+        }
+    }
     Row(
         Modifier.fillMaxWidth()
             .padding(start = K.gap3, end = K.gap3, top = 2.dp, bottom = K.gap3),
@@ -262,6 +330,16 @@ fun DepartRow(label: String, onWhen: () -> Unit, order: String, onOrder: () -> U
 
 @Composable
 private fun MenuPill(label: String, onClick: () -> Unit) {
+    // Moovit: "Leave now ▾" in white on the charcoal bar.
+    if (Mv.on) return Row(
+        Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp))
+            .border(1.dp, Color.White.copy(alpha = .35f), RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.width(8.dp)); Caret(Color.White)
+    }
     Row(
         Modifier.heightIn(min = 44.dp).glassSurface(K.rPill)
             .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp),
@@ -358,6 +436,7 @@ fun depMark(d: Moovit.Departure): DepMark = when {
 @Composable
 fun ItineraryCard(it: Moovit.Itinerary, r: Moovit.Resolved, onClick: (() -> Unit)? = null) {
     val now = System.currentTimeMillis() / 1000
+    if (Mv.on) return MvItineraryCard(it, r, now, onClick)
     Row(
         Modifier.fillMaxWidth()
             .panel(K.rCard)
@@ -411,6 +490,53 @@ fun ItineraryCard(it: Moovit.Itinerary, r: Moovit.Resolved, onClick: (() -> Unit
     }
 }
 
+/**
+ * Moovit's route card: the leg strip and "Leaves in" on the left, the trip's length large on the
+ * right, then the clock times.
+ */
+@Composable
+private fun MvItineraryCard(it: Moovit.Itinerary, r: Moovit.Resolved, now: Long, onClick: (() -> Unit)?) {
+    Column(
+        Modifier.fillMaxWidth().mvCard()
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f)) {
+                RouteStrip(it, r)
+                Spacer(Modifier.height(K.gap2))
+                DepartureLine(it, r, now)
+            }
+            Spacer(Modifier.width(K.gap3))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val big = if (it.durationMin >= 60) "%d:%02d".format(it.durationMin / 60, it.durationMin % 60)
+                    else "${it.durationMin}"
+                Text(big, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = K.text, maxLines = 1)
+                Text(
+                    if (it.durationMin >= 60) T("hr", "שע׳") else T("min", "דק׳"),
+                    fontSize = 13.sp, color = K.dim, modifier = Modifier.offset(y = (-4).dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            T.ltr(hm.format(Date(it.dep * 1000)) + " – " + hm.format(Date(it.arr * 1000))),
+            fontSize = 13.sp, color = K.dim,
+        )
+        it.legs.firstOrNull { leg -> leg.kind == Moovit.LegKind.TAXI }?.let { taxi ->
+            Spacer(Modifier.height(K.gap2))
+            GettButton(taxi)
+        }
+        val chips = cardChips(it)
+        if (chips.isNotEmpty()) {
+            Spacer(Modifier.height(K.gap2))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                chips.forEach { c -> InfoChip(c.first, c.second) }
+            }
+        }
+    }
+}
+
 private fun durationValue(min: Int): String =
     if (min >= 60) T("${min / 60}h ${min % 60}m", "${min / 60}ש׳ ${min % 60}דק׳") else "$min"
 
@@ -458,7 +584,9 @@ private fun RouteStrip(it: Moovit.Itinerary, r: Moovit.Resolved) {
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         shown.forEachIndexed { i, leg ->
-            if (i > 0) Box(Modifier.height(28.dp), contentAlignment = Alignment.Center) { Chevron(size = 11.dp) }
+            if (i > 0) Box(Modifier.height(if (Mv.on) 34.dp else 28.dp), contentAlignment = Alignment.Center) {
+                Chevron(if (Mv.on) K.dim else K.surface4, size = 11.dp)
+            }
             when (leg.kind) {
                 Moovit.LegKind.RIDE -> Box(
                     Modifier.padding(vertical = PIP_OVERHANG, horizontal = PIP_OVERHANG),
@@ -506,6 +634,7 @@ private fun LineBadgeOnline(lineId: Int, shortName: String, r: Moovit.Resolved) 
     val agency = info?.agencyId ?: -1
     val rt = if (info != null) r.routeType(agency) else 3
     val label = shortName.ifBlank { null } ?: info?.number?.ifBlank { null }
+    if (Mv.on) return MvBadge(rt, agency, label, mvLineColour(rt, agency, r.agencyName(agency)))
     val plate = plateFor(rt, agency)
     Column(
         Modifier.width(IntrinsicSize.Min).clip(RoundedCornerShape(6.dp)).background(plate?.fill ?: K.badgePlate)

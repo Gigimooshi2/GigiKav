@@ -357,7 +357,9 @@ fun LiveScreen(model: KavModel) {
             Text(T("showing central Tel Aviv", "מוצג מרכז תל אביב"), style = DisplayItalic, fontSize = 12.sp, color = K.dim)
         }
         Box(
-            Modifier.padding(horizontal = K.gap3).fillMaxWidth().weight(1f).panel(14.dp),
+            // Moovit: the map runs edge to edge under the bar.
+            if (Mv.on) Modifier.fillMaxWidth().weight(1f)
+            else Modifier.padding(horizontal = K.gap3).fillMaxWidth().weight(1f).panel(14.dp),
         ) {
             CompositionLocalProvider(LocalLiquidBackdrop provides liveLiquid) {
                 LiveMap(
@@ -591,6 +593,7 @@ private fun LiveMap(
 @Composable
 private fun LinePlate(v: Tracked) {
     val agency = v.line?.agencyId ?: -1
+    if (Mv.on) return MvBadge(v.routeType, agency, v.number, mvLineColour(v.routeType, agency, Moovit.agencyName(agency)))
     val plate = plateFor(v.routeType, agency)
     Row(
         Modifier.clip(RoundedCornerShape(7.dp)).background(plate?.fill ?: K.plate)
@@ -622,14 +625,15 @@ private fun LiveList(vehicles: List<Tracked>, now: Long, modifier: Modifier, onS
         )
         return
     }
+    val side = if (Mv.on) 0.dp else K.gap1
     LazyColumn(modifier, contentPadding = PaddingValues(
-        start = K.gap1, top = K.gap1, end = K.gap1, bottom = K.gap1 + LocalBottomBarInset.current,
+        start = side, top = side, end = side, bottom = side + LocalBottomBarInset.current,
     )) {
         items(vehicles, key = { it.tripId }) { v ->
             val a = v.arrival
             val ageS = (now - a.sampleUtc).coerceAtLeast(0)
             Row(
-                Modifier.fillMaxWidth().padding(vertical = K.gap1).panel(K.rControl)
+                Modifier.fillMaxWidth().then(if (Mv.on) Modifier.mvRow() else Modifier.padding(vertical = K.gap1).panel(K.rControl))
                     .clickable(role = Role.Button) { onSelect(v) }
                     .padding(horizontal = K.gap3, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -657,7 +661,7 @@ private fun LiveList(vehicles: List<Tracked>, now: Long, modifier: Modifier, onS
 @Composable
 private fun CardClose(onClose: () -> Unit) {
     Box(
-        Modifier.size(36.dp).panel(12.dp)
+        Modifier.size(36.dp).panel(if (Mv.on) 24.dp else 12.dp)
             .clickable(role = Role.Button, onClickLabel = T("Close", "סגירה"), onClick = onClose),
         contentAlignment = Alignment.Center,
     ) { Text("✕", fontSize = 13.sp, color = K.muted) }

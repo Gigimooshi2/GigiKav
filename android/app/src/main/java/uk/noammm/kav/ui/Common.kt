@@ -150,6 +150,10 @@ fun DrawScope.drawWalker(tint: Color) {
 @Composable
 fun LineBadge(net: Net, route: Int, modifier: Modifier = Modifier) {
     val rType = net.rType.getOrElse(route) { 3 }
+    if (Mv.on) return MvBadge(
+        rType, -1, net.rShort.getOrElse(route) { "" }.ifBlank { null },
+        mvLineColour(rType, -1, net.agencyOf(route)), modifier,
+    )
     val plate = plateFor(rType)
     Row(
         modifier
@@ -474,9 +478,15 @@ fun BottomSheet(
                             androidx.compose.animation.core.tween(220, easing = androidx.compose.animation.core.FastOutLinearInEasing),
                         ) { it },
                     )
-                    .padding(bottom = maxOf(bottomCover(), LocalBottomBarInset.current))
-                    .padding(K.gap3)
-                    .panel(K.rCard, solid = true)
+                    // Moovit: a full-width sheet with rounded top corners, flush with the bottom bar.
+                    .then(
+                        if (Mv.on) Modifier.clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                            .background(K.surface1)
+                            .padding(bottom = maxOf(bottomCover(), LocalBottomBarInset.current))
+                        else Modifier.padding(bottom = maxOf(bottomCover(), LocalBottomBarInset.current))
+                            .padding(K.gap3)
+                            .panel(K.rCard, solid = true),
+                    )
                     .clickable(enabled = false) {}
                     .then(if (scrolls) Modifier.verticalScroll(rememberScrollState()) else Modifier)
                     .padding(K.gap4)

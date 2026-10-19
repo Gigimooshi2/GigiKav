@@ -4,6 +4,7 @@ package uk.noammm.kav.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -136,6 +137,9 @@ private fun TripDetailBody(
     shifting: Boolean = false,
     active: Boolean = false,
 ) {
+    val taxiOnly = trip.legs.any { it.kind == Moovit.LegKind.TAXI } &&
+        trip.legs.none { it.kind == Moovit.LegKind.RIDE }
+    if (Mv.on) return MvTripDetail(trip, r, fromLabel, toLabel, onBack, onTrack, onStart, onShift, shifting, active, taxiOnly)
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -147,8 +151,6 @@ private fun TripDetailBody(
             Sig(T("Your", "הנסיעה"), T("trip", "שלכם"), Modifier.weight(1f))
             val ctx = androidx.compose.ui.platform.LocalContext.current
             ShareButton { shareTrip(ctx, trip, fromLabel, toLabel) }
-            val taxiOnly = trip.legs.any { it.kind == Moovit.LegKind.TAXI } &&
-                trip.legs.none { it.kind == Moovit.LegKind.RIDE }
             if (!taxiOnly) {
                 Spacer(Modifier.width(K.gap2))
                 RerouteToggle(dest = trip.legs.lastOrNull { it.shape.isNotEmpty() }?.shape?.lastOrNull())
@@ -182,8 +184,100 @@ private fun TripDetailBody(
     }
 }
 
+/**
+ * Moovit's route page: charcoal bar, the map, the summary and the step list, with Start and
+ * Share as pills along the bottom.
+ */
+@Composable
+private fun MvTripDetail(
+    trip: Moovit.Itinerary,
+    r: Moovit.Resolved,
+    fromLabel: String,
+    toLabel: String,
+    onBack: () -> Unit,
+    onTrack: (Moovit.Leg, Int) -> Unit,
+    onStart: () -> Unit,
+    onShift: ((Int) -> Unit)?,
+    shifting: Boolean,
+    active: Boolean,
+    taxiOnly: Boolean,
+) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Column(Modifier.fillMaxSize().background(K.bg)) {
+        MvTopBar(T("Route details", "פרטי המסלול"), onBack) {
+            if (!taxiOnly) RerouteToggle(dest = trip.legs.lastOrNull { it.shape.isNotEmpty() }?.shape?.lastOrNull())
+        }
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+            RouteMap(trip, r, modifier = Modifier)
+            Summary(trip, r)
+            if (onShift != null) Row(
+                Modifier.fillMaxWidth().background(K.surface1).padding(horizontal = K.gap3, vertical = K.gap2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ShiftButton(T("‹ Earlier", "› מוקדם יותר")) { onShift(-1) }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (shifting) T("Searching…", "מחפשים…")
+                    else hm.format(Date(trip.dep * 1000)) + " – " + hm.format(Date(trip.arr * 1000)),
+                    fontSize = 13.sp, color = K.dim,
+                )
+                Spacer(Modifier.weight(1f))
+                ShiftButton(T("Later ›", "מאוחר יותר ‹")) { onShift(1) }
+            }
+            Spacer(Modifier.height(K.gap3))
+            Timeline(trip, r, fromLabel, toLabel, onTrack)
+            Spacer(Modifier.height(K.gap5))
+        }
+        Column(Modifier.fillMaxWidth().background(K.surface1).padding(bottom = LocalBottomBarInset.current)) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(K.border))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = K.gap3, vertical = K.gap2),
+                horizontalArrangement = Arrangement.spacedBy(K.gap2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (!taxiOnly) StartButton(resume = active, onClick = onStart)
+                MvPill(T("Share", "שיתוף"), Mv.blue, filled = false, icon = { tint -> MvShareGlyph(tint) }) {
+                    shareTrip(ctx, trip, fromLabel, toLabel)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun Summary(trip: Moovit.Itinerary, r: Moovit.Resolved) {
+    if (Mv.on) return Column(Modifier.fillMaxWidth().background(K.surface1).padding(K.gap4)) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(dur((trip.arr - trip.dep).toInt()), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = K.text)
+            Spacer(Modifier.width(K.gap2))
+            Text(
+                T("Arrive at ${hm.format(Date(trip.arr * 1000))}", "הגעה ב-${hm.format(Date(trip.arr * 1000))}") +
+                    (if (trip.fare >= 0) " • " + "%s%.2f".format(trip.currency, trip.fare / 100.0) else ""),
+                fontSize = 14.sp, color = K.dim, modifier = Modifier.padding(bottom = 3.dp),
+            )
+        }
+        Spacer(Modifier.height(K.gap3))
+        Box(
+            Modifier.clip(RoundedCornerShape(6.dp)).background(K.surface1)
+                .border(1.dp, K.border, RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+        ) { TripStrip(trip, r) }
+        val chips = ArrayList<String>()
+        if (trip.accessible) chips.add(T("Step-free", "נגיש"))
+        if (Shown.co2 && trip.co2g >= 0) chips.add(co2(trip.co2g))
+        trip.tags.forEach { chips.add(it) }
+        if (chips.isNotEmpty()) {
+            Spacer(Modifier.height(K.gap2))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                chips.forEach { c ->
+                    Text(
+                        c, fontSize = 13.sp, color = Color(0xFF8E3A97),
+                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x1F8E3A97))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
+            }
+        }
+    }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = K.gap3)
             .glassSurface(K.rCard).padding(K.gap4),
@@ -535,6 +629,10 @@ private fun BoardOption(
     val now = System.currentTimeMillis() / 1000
     Column(Modifier.fillMaxWidth().padding(vertical = K.gap2)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (Mv.on) MvBadge(
+                rt, agency, ride.shortName.ifBlank { null } ?: info?.number?.ifBlank { null } ?: "#${ride.lineId}",
+                mvLineColour(rt, agency, r.agencyName(agency)), big = true,
+            ) else
             Row(
                 Modifier.clip(RoundedCornerShape(10.dp)).background(plate?.fill ?: K.surface2)
                     .padding(horizontal = 10.dp, vertical = 7.dp),

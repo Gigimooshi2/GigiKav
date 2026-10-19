@@ -55,6 +55,20 @@ internal fun HomeScreen(
     androidx.activity.compose.BackHandler(alert != null) { alert = null }
     CompositionLocalProvider(LocalServiceAlertOpener provides { group, label -> alert = group to label }) {
     Box(Modifier.fillMaxSize()) {
+        if (Mv.on) MvHome(
+            model, recentTrips, onSearch, onTrip, onResume,
+            favourites = {
+                FavouriteStrip(
+                    favourites,
+                    onPick = { f -> f.place?.let { onFavourite(it) } ?: onSetFavourite(f) },
+                    onAdd = { creating = true },
+                    onEdit = { editing = it },
+                    onReorder = { save(it) },
+                    onRemove = { f -> save(favourites.filter { it.id != f.id }) },
+                )
+            },
+            onAdd = { creating = true },
+        ) else
         Column(Modifier.fillMaxSize()) {
             ScreenHeader(T("Home", "בית"), "", onSettings = { model.settingsOpen = true }, badge = model.update != null)
             FloatingTop(top = {
@@ -187,6 +201,111 @@ internal fun HomeScreen(
             onDismiss = { editing = null },
             onChangePlace = { editing = null; onSetFavourite(f) },
         )
+    }
+}
+
+private class MvLink(val label: String, val icon: DrawScope.() -> Unit, val go: () -> Unit)
+
+/**
+ * Moovit's home: the charcoal header with the search pill, then white blocks under pale strips
+ * (current trip, favourites, recent trips, Kav's own links).
+ */
+@Composable
+private fun MvHome(
+    model: KavModel,
+    recentTrips: List<RecentTrip>,
+    onSearch: () -> Unit,
+    onTrip: (RecentTrip) -> Unit,
+    onResume: () -> Unit,
+    favourites: @Composable () -> Unit,
+    onAdd: () -> Unit,
+) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    LazyColumn(
+        Modifier.fillMaxSize().background(K.bg),
+        contentPadding = PaddingValues(bottom = K.gap6 + LocalBottomBarInset.current),
+    ) {
+        item(key = "header") {
+            Column(
+                Modifier.fillMaxWidth().background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(Mv.bar, androidx.compose.ui.graphics.lerp(Mv.bar, androidx.compose.ui.graphics.Color.Black, .35f)),
+                    ),
+                ).padding(start = K.gap4, end = K.gap1, bottom = K.gap5),
+            ) {
+                Row(Modifier.fillMaxWidth().padding(top = K.gap2), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        T("ISRAEL", "ישראל"), fontSize = 12.sp, letterSpacing = 1.sp,
+                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = .7f), modifier = Modifier.weight(1f),
+                    )
+                    CompositionLocalProvider(LocalOnBar provides true) {
+                        MvMenuButton(model.update != null) { model.settingsOpen = true }
+                    }
+                }
+                MvWordmark()
+                Spacer(Modifier.height(K.gap5))
+                MvSearchButton(T("Where do you want to go?", "לאן תרצו להגיע?"), Modifier.padding(end = K.gap3), onSearch)
+            }
+        }
+        model.activeJourney?.let { journey ->
+            item(key = "journey") {
+                Box(Modifier.padding(horizontal = K.gap3, vertical = K.gap3)) { JourneyCard(model, journey, onResume) }
+            }
+        }
+        item(key = "fav-head") { MvSection(T("Favorites", "מועדפים"), T("Add", "הוספה"), onAdd) }
+        item(key = "fav") { Box(Modifier.fillMaxWidth().background(K.surface1).padding(horizontal = K.gap1)) { favourites() } }
+        if (recentTrips.isNotEmpty()) {
+            item(key = "recent-head") { MvSection(T("Recent trips", "נסיעות אחרונות")) }
+            recentTrips.forEachIndexed { index, trip ->
+                item(key = "recent-$index") {
+                    Row(
+                        Modifier.fillMaxWidth().mvRow(divider = index < recentTrips.lastIndex, inset = 60.dp)
+                            .clickable(role = Role.Button) { onTrip(trip) }
+                            .heightIn(min = 64.dp).padding(horizontal = K.gap4, vertical = K.gap3),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(K.gap4),
+                    ) {
+                        Box(
+                            Modifier.size(28.dp).clip(RoundedCornerShape(14.dp)).background(Mv.strip),
+                            contentAlignment = Alignment.Center,
+                        ) { ClockGlyph(K.muted, 16.dp) }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                T("To: ", "אל: ") + trip.to.name, fontSize = 16.sp, color = K.text, fontWeight = FontWeight.Medium,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                T("From: ", "מ: ") + (trip.from?.name ?: T("Current location", "המיקום הנוכחי")),
+                                fontSize = 13.sp, color = K.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Text(tripWhen(trip.at), fontSize = 12.sp, color = K.dim)
+                    }
+                }
+            }
+        }
+        item(key = "kav-head") { MvSection("GigiKav") }
+        val links = listOf(
+            MvLink(T("Found a bug?", "מצאתם באג?"), { drawBug() }) { openLink(ctx, whatsApp(ctx, "Bug in GigiKav")) },
+            MvLink(T("Request a feature?", "רוצים פיצ'ר חדש?"), { drawBulb() }) { openLink(ctx, whatsApp(ctx, "Feature request for GigiKav")) },
+            MvLink(T("Buy Noam a coffee (original creator)", "קנו לנועם קפה (היוצר המקורי)"), { drawCoffee() }) { openLink(ctx, COFFEE_URL) },
+            MvLink(T("Buy Nadav a coffee (modder)", "קנו לנדב קפה (יוצר המוד)"), { drawCoffee() }) { openLink(ctx, MODDER_COFFEE_URL) },
+        )
+        links.forEachIndexed { i, link ->
+            item(key = "link-$i") {
+                Row(
+                    Modifier.fillMaxWidth().mvRow(divider = i < links.lastIndex, inset = 60.dp)
+                        .clickable(role = Role.Button, onClick = link.go)
+                        .heightIn(min = 56.dp).padding(horizontal = K.gap4, vertical = K.gap3),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(K.gap4),
+                ) {
+                    Canvas(Modifier.size(28.dp).padding(4.dp)) { link.icon(this) }
+                    Text(link.label, fontSize = 16.sp, color = K.text, modifier = Modifier.weight(1f))
+                    Text(T.onward, fontSize = 20.sp, color = K.dim)
+                }
+            }
+        }
     }
 }
 

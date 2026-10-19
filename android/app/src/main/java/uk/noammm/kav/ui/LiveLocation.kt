@@ -84,6 +84,10 @@ fun rememberLineRoutes(shapeIds: List<Int>): Map<Int, List<Pair<Double, Double>>
 
 @Composable
 fun LiveLocationButton(live: Boolean, onClick: () -> Unit) {
+    if (Mv.on) return MvPill(
+        T("Live location", "מיקום הקו"), Mv.blue, filled = live,
+        icon = { tint -> LiveGlyph(tint, 15.dp) }, onClick = onClick,
+    )
     Row(
         Modifier.heightIn(min = 44.dp).glassSurface(22.dp)
             .clickable(role = Role.Button, onClick = onClick)
@@ -122,6 +126,10 @@ fun LiveLocationScreen(
             val agency = info?.agencyId ?: -1
             val rt = if (info != null) r.routeType(agency) else 3
             val plate = plateFor(rt, agency)
+            if (Mv.on) MvBadge(
+                rt, agency, leg.shortName.ifBlank { null } ?: info?.number?.ifBlank { null } ?: "#${leg.lineId}",
+                mvLineColour(rt, agency, r.agencyName(agency)), big = true,
+            ) else
             Row(
                 Modifier.clip(RoundedCornerShape(10.dp)).background(plate?.fill ?: K.surface1)
                     .padding(horizontal = 10.dp, vertical = 7.dp),

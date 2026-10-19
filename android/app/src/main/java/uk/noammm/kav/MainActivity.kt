@@ -38,9 +38,12 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -179,7 +182,8 @@ class MainActivity : ComponentActivity() {
             val view = androidx.compose.ui.platform.LocalView.current
             androidx.compose.runtime.SideEffect {
                 val bars = androidx.core.view.WindowCompat.getInsetsController(window, view)
-                bars.isAppearanceLightStatusBars = light
+                // Moovit keeps a charcoal (or green) band under the status bar on every look.
+                bars.isAppearanceLightStatusBars = light && !Mv.on
                 bars.isAppearanceLightNavigationBars = light
             }
             KavTheme {
@@ -644,10 +648,13 @@ private fun Shell(model: KavModel) {
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
-            Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.safeDrawing).background(K.bg))
+            Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.safeDrawing)
+                .background(if (Mv.on) Mv.statusBar ?: Mv.bar else K.bg))
         },
         bottomBar = {
-            if (model.navigating) Spacer(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.safeDrawing))
+            if (model.navigating) Spacer(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.safeDrawing)
+                .then(if (Mv.on) Modifier.background(K.surface1) else Modifier))
+            else if (Mv.on) MvTabBar(model)
             else TabBar(model)
         },
     ) { pad ->
@@ -860,6 +867,98 @@ private fun TabBar(model: KavModel) {
                     selectedTextColor = K.text, unselectedTextColor = K.dim,
                 ),
             )
+        }
+    }
+}
+
+private fun selectTab(model: KavModel, t: Tab) {
+    val on = model.tab == t
+    model.settingsOpen = false
+    if (on) { model.stationStop = -1; model.lineRoute = -1 }
+    if (t == Tab.Directions) model.returnHome = true
+    model.tab = t
+}
+
+/** Moovit's bottom bar: flat, white, a hairline on top, the chosen tab in blue. */
+@Composable
+private fun MvTabBar(model: KavModel) {
+    Column(Modifier.fillMaxWidth().background(K.surface1)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(K.border))
+        Row(
+            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).height(60.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Tab.entries.forEach { t ->
+                val on = model.tab == t
+                val tint = if (on) Mv.link else K.dim
+                Column(
+                    Modifier.weight(1f).fillMaxHeight()
+                        .semantics { selected = on }
+                        .clickable(role = Role.Tab) { selectTab(model, t) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    MvTabGlyph(t, tint)
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        if (t == Tab.Directions) T("Directions", "הוראות הגעה") else t.label,
+                        fontSize = 12.sp, color = tint, fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MvTabGlyph(tab: Tab, tint: Color) {
+    Canvas(Modifier.size(width = 30.dp, height = 22.dp)) {
+        val w = size.width; val h = size.height; val sw = h * .09f
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
+            drawLine(tint, Offset(x1 * w, y1 * h), Offset(x2 * w, y2 * h), sw, StrokeCap.Round)
+        when (tab) {
+            // •→● : where you are, an arrow, where you're going.
+            Tab.Directions -> {
+                val l = mirrorX(.14f); val r = mirrorX(.86f)
+                drawCircle(tint, h * .13f, Offset(w * l, h * .5f), style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
+                drawCircle(tint, h * .17f, Offset(w * r, h * .5f))
+                line(mirrorX(.28f), .5f, mirrorX(.62f), .5f)
+                line(mirrorX(.62f), .5f, mirrorX(.52f), .36f); line(mirrorX(.62f), .5f, mirrorX(.52f), .64f)
+            }
+            Tab.Stations -> {
+                val p = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(w * .5f, h * .96f)
+                    cubicTo(w * .36f, h * .70f, w * .30f, h * .55f, w * .30f, h * .40f)
+                    cubicTo(w * .30f, h * .16f, w * .40f, h * .04f, w * .5f, h * .04f)
+                    cubicTo(w * .60f, h * .04f, w * .70f, h * .16f, w * .70f, h * .40f)
+                    cubicTo(w * .70f, h * .55f, w * .64f, h * .70f, w * .5f, h * .96f)
+                    close()
+                }
+                drawPath(p, tint, style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
+                drawCircle(tint, h * .09f, Offset(w * .5f, h * .38f))
+            }
+            // o-o-o
+            Tab.Lines -> {
+                for (x in listOf(.16f, .5f, .84f)) drawCircle(tint, h * .14f, Offset(w * x, h * .5f), style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
+                line(.16f + .14f * h / w, .5f, .5f - .14f * h / w, .5f)
+                line(.5f + .14f * h / w, .5f, .84f - .14f * h / w, .5f)
+            }
+            // A bus front with Moovit's live arcs beside it.
+            Tab.Live -> {
+                val bw = w * .46f; val bx = if (T.rtl) w * .16f else w * .38f
+                drawRoundRect(tint, Offset(bx, h * .08f), androidx.compose.ui.geometry.Size(bw, h * .72f),
+                    androidx.compose.ui.geometry.CornerRadius(h * .14f), style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
+                line((bx / w) + .02f, .44f, (bx + bw) / w - .02f, .44f)
+                drawCircle(tint, h * .06f, Offset(bx + bw * .25f, h * .62f))
+                drawCircle(tint, h * .06f, Offset(bx + bw * .75f, h * .62f))
+                line((bx / w) + .07f, .82f, (bx / w) + .07f, .94f); line((bx + bw) / w - .07f, .82f, (bx + bw) / w - .07f, .94f)
+                for (r in listOf(.20f, .34f)) drawArc(
+                    tint, if (T.rtl) -40f else 140f, 80f, false,
+                    topLeft = Offset(w * mirrorX(.30f) - h * r, h * .44f - h * r), size = androidx.compose.ui.geometry.Size(h * r * 2, h * r * 2),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(sw, cap = StrokeCap.Round),
+                )
+            }
         }
     }
 }
@@ -1136,7 +1235,11 @@ object Prefs {
         store(ctx).edit().putString(RECENT_LINES, org.json.JSONArray(kept).toString()).apply()
     }
 
-    fun accent(ctx: Context): Int = store(ctx).getInt("accent", android.graphics.Color.rgb(0x9A, 0xBE, 0xFF))
+    fun accent(ctx: Context): Int {
+        val a = store(ctx).getInt("accent", android.graphics.Color.rgb(0x9A, 0xBE, 0xFF))
+        // The Moovit pack used to bring an orange accent; it now brings Moovit's action blue.
+        return if (a == 0xFFF27B35.toInt() && pack(ctx) == Pack.MOOVIT) Pack.MOOVIT.accent.toArgb() else a
+    }
     fun setAccent(ctx: Context, argb: Int) = store(ctx).edit().putInt("accent", argb).apply()
 
     fun lang(ctx: Context): Lang =
