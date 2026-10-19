@@ -16,6 +16,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.PI
@@ -26,12 +27,15 @@ import kotlin.math.sin
 fun Sig(plain: String, accent: String, modifier: Modifier = Modifier) {
     Text(
         "$plain $accent".trim(),
-        style = Display, modifier = modifier,
+        style = if (Mv.on) Display.copy(fontWeight = FontWeight.Medium, fontSize = 20.sp, color = ink(K.text)) else Display,
+        modifier = modifier,
     )
 }
 
 @Composable
 private fun PlateButton(label: String, onClick: () -> Unit, content: @Composable () -> Unit) {
+    // Moovit: bare white icons in its charcoal bars, white round buttons over a map.
+    if (Mv.on && LocalOnBar.current) return MvIconButton(label, onClick, content)
     Box(
         Modifier
             .size(48.dp)
@@ -44,6 +48,7 @@ private fun PlateButton(label: String, onClick: () -> Unit, content: @Composable
 
 @Composable
 fun BackButton(onClick: () -> Unit) = PlateButton(T("Back", "חזרה"), onClick) {
+    if (Mv.on) return@PlateButton MvBackArrow(ink(K.text))
     Canvas(Modifier.size(20.dp)) {
         val w = size.width; val h = size.height
         drawLine(K.muted, Offset(w * mirrorX(.66f), h * .16f), Offset(w * mirrorX(.30f), h * .50f), w * .11f, StrokeCap.Round)
@@ -53,6 +58,7 @@ fun BackButton(onClick: () -> Unit) = PlateButton(T("Back", "חזרה"), onClick
 
 @Composable
 fun ShareButton(onClick: () -> Unit) = PlateButton(T("Share trip", "שיתוף נסיעה"), onClick) {
+    if (Mv.on) return@PlateButton MvShareGlyph(ink(K.text))
     Canvas(Modifier.size(20.dp)) {
         val w = size.width; val h = size.height
         val a = Offset(w * .72f, h * .20f)
@@ -92,6 +98,9 @@ fun SettingsButton(badge: Boolean = false, onClick: () -> Unit) = PlateButton(T(
 
 @Composable
 fun Chip(text: String, lit: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    // Moovit: blue pills, filled when chosen, outlined otherwise.
+    if (Mv.on) return MvPill(text, Mv.blue, filled = lit, modifier = modifier.heightIn(min = 44.dp)
+        .semantics { selected = lit }, onClick = onClick)
     Box(
         modifier
             .heightIn(min = 44.dp)
@@ -116,6 +125,10 @@ fun ScreenHeader(
     plain: String, accent: String, onSettings: (() -> Unit)? = null, back: (() -> Unit)? = null,
     badge: Boolean = false,
 ) {
+    if (Mv.on) {
+        MvTopBar("$plain $accent".trim(), back) { if (onSettings != null) MvMenuButton(badge, onSettings) }
+        return
+    }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = K.gap3, vertical = K.gap3).heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically,

@@ -58,8 +58,10 @@ fun Modifier.glassSurface(radius: Dp = 22.dp): Modifier {
 }
 
 fun Modifier.panel(radius: Dp = K.rCard, solid: Boolean = false): Modifier {
+    // Moovit: white cards with a soft shadow, the way its home and results cards sit on the page.
+    if (Mv.on) return mvCard(K.r(radius))
     val shape = RoundedCornerShape(K.r(radius))
-    // Google/Moovit packs: flat, opaque tonal cards with no outline.
+    // Google pack: flat, opaque tonal cards with no outline.
     if (!K.outlined) return clip(shape).background(K.surface1)
     val body = clip(shape).background(if (solid) paneFill.compositeOver(K.bg) else paneFill)
     return if (K.liquid) body.border(1.dp, liquidRim(floating = solid), shape)

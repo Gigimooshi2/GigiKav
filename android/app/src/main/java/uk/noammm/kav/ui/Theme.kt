@@ -23,7 +23,8 @@ enum class Look { DARK, OLED, LIGHT }
 enum class Pack(val accent: Color, val live: Color?) {
     KAV(DefaultAccent, null),
     GOOGLE(Color(0xFF4C8DF6), Color(0xFF34A853)),
-    MOOVIT(Color(0xFFF27B35), Color(0xFF3DBA6A)),
+    // Moovit's own action blue and real-time green (sampled from its store screenshots).
+    MOOVIT(Color(0xFF1864E5), Color(0xFF038844)),
 }
 
 object K {
@@ -56,7 +57,7 @@ object K {
     // Text on the accent follows its brightness: dark on pale accents (Kav's), white on deep ones.
     val onAccent get() = if (accent.luminance() > 0.42f) Color(0xFF111114) else Color.White
     val route get() = accent
-    val live get() = pack.live ?: accent
+    val live get() = if (pack == Pack.MOOVIT && !light) Color(0xFF2FBF71) else pack.live ?: accent
     var routeIdle by mutableStateOf(Color(0xFF7E7E87))
     var problem by mutableStateOf(Color(0xFFE7C17A))
     var critical by mutableStateOf(Color(0xFFEE929A))
@@ -66,7 +67,7 @@ object K {
     fun r(radius: Dp): Dp = when (pack) {
         Pack.KAV -> radius
         Pack.GOOGLE -> if (radius >= 24.dp) radius else radius + 4.dp
-        Pack.MOOVIT -> if (radius >= 24.dp) radius else minOf(radius, 10.dp)
+        Pack.MOOVIT -> if (radius >= 24.dp) radius else minOf(radius, 8.dp)
     }
     /** Hairline around panels; Google and Moovit use flat tonal surfaces instead. */
     val outlined get() = pack == Pack.KAV
@@ -139,14 +140,14 @@ object K {
             0xFF5F6368, 0xFF3C4043, 0xFF202124, 0xFFF8F9FA, 0xFF9AA0A6, 0xFFB06000, 0xFFD93025, true)
     }
 
-    // Moovit's charcoal (dark) and grey-with-white-cards (light).
+    // Moovit: white cards and rows on a pale blue-grey page, near-black ink; dark looks keep the same structure.
     private fun moovitPalette(l: Look) = when (l) {
-        Look.DARK -> palette(0xFF17181C, 0xFF232529, 0xFF2B2E33, 0xFF34373D, 0xFF43474E, 0xFF2E3136, 0xFF6E737B,
-            0xFF9A9EA6, 0xFFC5C8CE, 0xFFF2F3F5, 0xFF121316, 0xFF6E737B, 0xFFF5C24C, 0xFFF0706A, false)
-        Look.OLED -> palette(0xFF000000, 0xFF18191C, 0xFF212327, 0xFF2B2E33, 0xFF3A3D43, 0xFF23252A, 0xFF6E737B,
-            0xFF9A9EA6, 0xFFC5C8CE, 0xFFF2F3F5, 0xFF0B0B0D, 0xFF6E737B, 0xFFF5C24C, 0xFFF0706A, false)
-        Look.LIGHT -> palette(0xFFEEF0F2, 0xFFFFFFFF, 0xFFE4E6E9, 0xFFD6D9DD, 0xFFC0C4CA, 0xFFDDE0E4, 0xFF9AA0A8,
-            0xFF6B7079, 0xFF3E434A, 0xFF1C1E21, 0xFFF6F7F8, 0xFFA3A8B0, 0xFFA86A00, 0xFFC93C37, true)
+        Look.DARK -> palette(0xFF131417, 0xFF1F2024, 0xFF27292E, 0xFF313338, 0xFF45484E, 0xFF2D2F34, 0xFF6E737B,
+            0xFF9A9EA6, 0xFFC5C8CE, 0xFFF2F3F5, 0xFF0E0F11, 0xFF6E737B, 0xFFF5B83D, 0xFFFF5A6E, false)
+        Look.OLED -> palette(0xFF000000, 0xFF17181B, 0xFF202226, 0xFF2A2C31, 0xFF3A3D43, 0xFF232529, 0xFF6E737B,
+            0xFF9A9EA6, 0xFFC5C8CE, 0xFFF2F3F5, 0xFF0B0B0D, 0xFF6E737B, 0xFFF5B83D, 0xFFFF5A6E, false)
+        Look.LIGHT -> palette(0xFFEEF2F6, 0xFFFFFFFF, 0xFFF1F3F5, 0xFFE3E6EA, 0xFFC9CDD2, 0xFFE1E4E7, 0xFFA3A8B0,
+            0xFF848488, 0xFF4A4B52, 0xFF1C1D23, 0xFFF6F7F8, 0xFFA3A8B0, 0xFFD99000, 0xFFE10C32, true)
     }
 }
 

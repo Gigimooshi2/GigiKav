@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -39,11 +40,12 @@ fun RerouteToggle(glass: Boolean = true, dest: Pair<Double, Double>? = null) {
     var menu by remember { mutableStateOf(false) }
     val owner = remember(dest, Reroute.altsVersion) { Reroute.savedPlaceAt(ctx, dest) }
     val chosen = remember(dest, Reroute.altsVersion) { Reroute.altsFor(ctx, dest) }
+    val onBar = LocalOnBar.current
     Box {
         Box(
             Modifier.size(48.dp)
-                .then(if (glass) Modifier.glassSurface(24.dp) else Modifier.clip(RoundedCornerShape(24.dp)))
-                .then(if (on) Modifier.clip(RoundedCornerShape(24.dp)).background(K.accent.copy(alpha = .22f)) else Modifier)
+                .then(if (glass && !onBar) Modifier.glassSurface(24.dp) else Modifier.clip(RoundedCornerShape(24.dp)))
+                .then(if (on) Modifier.clip(RoundedCornerShape(24.dp)).background((if (onBar) Color.White else K.accent).copy(alpha = .22f)) else Modifier)
                 .semantics {
                     contentDescription = T("Smart reroute", "ניתוב חכם")
                     stateDescription = if (on) T("On", "פועל") else T("Off", "כבוי")
@@ -51,7 +53,11 @@ fun RerouteToggle(glass: Boolean = true, dest: Pair<Double, Double>? = null) {
                 .clickable(role = Role.Button) { menu = true },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Rounded.AltRoute, null, tint = if (on) K.accent else K.muted, modifier = Modifier.size(22.dp))
+            Icon(
+                Icons.Rounded.AltRoute, null,
+                tint = if (onBar) (if (on) Color.White else Color.White.copy(alpha = .6f)) else if (on) K.accent else K.muted,
+                modifier = Modifier.size(22.dp),
+            )
             if (on && chosen.isNotEmpty()) Text(
                 "+${chosen.size}", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = K.onAccent,
                 modifier = Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp)

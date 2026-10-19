@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -81,13 +82,17 @@ private fun StationList(model: KavModel, net: Net) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(T("Find a", "מצאו"), T("stop", "תחנה"))
+        // Moovit: the search box lives in the charcoal header.
+        if (Mv.on) MvSearchHeader(T("Stations", "תחנות"), q, { q = it }, T("Search for a station", "חיפוש תחנה"))
+        else ScreenHeader(T("Find a", "מצאו"), T("stop", "תחנה"))
         val listState = rememberLazyListState()
+        val side = if (Mv.on) 0.dp else K.gap2
         Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(
-            start = K.gap2, end = K.gap2, bottom = LocalBottomBarInset.current,
+            start = side, end = side, bottom = LocalBottomBarInset.current,
         )) {
-            item(key = "search") {
+            if (Mv.on) item(key = "map") { SelectOnMapRow { onMap = true } }
+            else item(key = "search") {
                 Column {
                     KavField(q, { q = it }, T("search stops…", "חיפוש תחנות…"), Modifier.padding(horizontal = K.gap1).fillMaxWidth())
                     Spacer(Modifier.height(K.gap2))
@@ -104,7 +109,8 @@ private fun StationList(model: KavModel, net: Net) {
                 }
             } else {
                 item {
-                    Sig(T("Nearby", "תחנות"), T("stops", "בסביבה"), Modifier.padding(horizontal = K.gap3, vertical = K.gap1))
+                    if (Mv.on) MvSection(T("Nearby stations", "תחנות בסביבה"))
+                    else Sig(T("Nearby", "תחנות"), T("stops", "בסביבה"), Modifier.padding(horizontal = K.gap3, vertical = K.gap1))
                 }
                 when {
                     here == null -> item {
@@ -142,7 +148,7 @@ private fun StationList(model: KavModel, net: Net) {
                 }
             }
         }
-        ScrollEdge(listState.canScrollBackward)
+        if (!Mv.on) ScrollEdge(listState.canScrollBackward)
         }
     }
 }
@@ -170,6 +176,7 @@ private fun DepartureBoard(model: KavModel, net: Net, stop: Int, onBack: () -> U
         out.sortedBy { it.second }.take(60)
     }
 
+    if (Mv.on) return MvDepartureBoard(model, net, stop, rows, t0, moovitId, onBack)
     Column(Modifier.fillMaxSize().background(K.bg)) {
         ScreenHeader(T("Next", "היציאות"), T("departures", "הקרובות"), back = onBack)
         Column(Modifier.padding(horizontal = K.gap4)) {
@@ -237,10 +244,84 @@ private fun DepartureBoard(model: KavModel, net: Net, stop: Int, onBack: () -> U
     }
 }
 
+/**
+ * Moovit's station page: the stop under the bar, blue pills to plan from or to it, a "Today"
+ * strip, then one row per departure (badge, where it goes, time on the end).
+ */
+@Composable
+private fun MvDepartureBoard(
+    model: KavModel, net: Net, stop: Int, rows: List<Pair<Int, Int>>, t0: Int, moovitId: Int, onBack: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize().background(K.bg)) {
+        MvTopBar(net.name[stop], onBack)
+        Column(Modifier.fillMaxWidth().background(K.surface1).padding(horizontal = K.gap4, vertical = K.gap3)) {
+            Text(T("Station", "תחנה"), fontSize = 13.sp, color = K.dim)
+            Spacer(Modifier.height(K.gap1))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (moovitId > 0) {
+                    StopGlyphOrPhoto(moovitId, null, thumb = 48.dp)
+                    Spacer(Modifier.width(K.gap3))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(net.name[stop], fontSize = 17.sp, color = K.text, fontWeight = FontWeight.Medium)
+                    val city = net.cityOf(stop)
+                    val code = net.code.getOrElse(stop) { 0 }
+                    Text(
+                        listOfNotNull(city.takeIf { it.isNotBlank() }, code.takeIf { it > 0 }?.let { T("Stop $it", "מס׳ $it") })
+                            .joinToString(" • "),
+                        fontSize = 13.sp, color = K.dim,
+                    )
+                }
+            }
+            Spacer(Modifier.height(K.gap3))
+            Row(horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+                MvPill(T("Start here", "התחלה כאן"), Mv.blue) {
+                    model.pendingFrom = placeOf(net, stop); model.tab = uk.noammm.kav.Tab.Directions
+                }
+                MvPill(T("End here", "סיום כאן"), Mv.blue, filled = false) {
+                    model.pendingTo = placeOf(net, stop); model.tab = uk.noammm.kav.Tab.Directions
+                }
+            }
+        }
+        MvSection(T("Today · scheduled times", "היום · לפי לוח זמנים"))
+        if (rows.isEmpty()) {
+            Note(T("Nothing more today.", "אין עוד יציאות היום."), Modifier.padding(horizontal = K.gap4, vertical = K.gap4))
+        }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = LocalBottomBarInset.current)) {
+            items(rows) { (c, dep) ->
+                val t = net.tripOf(net.cST[c])
+                val last = net.tripLast(t)
+                Row(
+                    Modifier.fillMaxWidth().mvRow()
+                        .clickable {
+                            model.pendingFrom = placeOf(net, stop)
+                            model.pendingTo = placeOf(net, last)
+                            model.tab = uk.noammm.kav.Tab.Directions
+                        }
+                        .heightIn(min = 60.dp).padding(horizontal = K.gap4, vertical = K.gap3),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(K.gap3),
+                ) {
+                    LineBadge(net, net.tripRoute[t])
+                    Text(
+                        net.name[last], fontSize = 15.sp, color = K.text, lineHeight = 19.sp,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                    Text(relative(dep, t0) ?: hhmm(dep), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = K.text)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun StationThumb(net: Net, stop: Int) {
     var id by remember(stop) { mutableStateOf(StopPhotos.idNow(net, stop) ?: -1) }
     LaunchedEffect(stop) { if (id <= 0) id = StopPhotos.idOf(net, stop) ?: -1 }
+    if (Mv.on) return Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+        MvStopSign(30.dp)
+        if (id > 0) StopGlyphOrPhoto(id, null)
+    }
     Box(
         Modifier.size(40.dp).panel(10.dp),
         contentAlignment = Alignment.Center,

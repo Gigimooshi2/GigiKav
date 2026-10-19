@@ -156,6 +156,10 @@ internal fun chosenLegs(trip: Moovit.Itinerary, chosen: Map<Int, Int>): List<Moo
 
 @Composable
 fun StartButton(resume: Boolean = false, onClick: () -> Unit) {
+    if (Mv.on) return MvPill(
+        if (resume) T("Resume", "המשך") else T("Start", "התחלה"), Mv.green,
+        icon = { tint -> MvPlayGlyph(tint) }, onClick = onClick,
+    )
     Row(
         Modifier.clip(RoundedCornerShape(999.dp)).background(K.live)
             .clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 11.dp),
@@ -208,6 +212,13 @@ fun NavigateScreen(
 
     val liquid = rememberLiquidBackdrop()
     val bottomInset = LocalBottomBarInset.current
+    if (Mv.on) {
+        DisposableEffect(Unit) { Mv.statusBar = Mv.green; onDispose { Mv.statusBar = null } }
+        return MvNavigate(
+            model, trip, r, steps, journey, chosen, ::choose, now, currentStep, pager, following,
+            onStop, onExit, onPlan, bottomInset,
+        )
+    }
     CompositionLocalProvider(LocalLiquidBackdrop provides liquid) {
         BoxWithConstraints(Modifier.fillMaxSize().background(K.bg)) {
             val contentHeight = (maxHeight - bottomInset).coerceAtLeast(0.dp)
@@ -313,6 +324,94 @@ fun NavigateScreen(
                     Spacer(Modifier.weight(1f))
                     Text(T.ltr("${pager.currentPage + 1} / ${steps.size}"), fontSize = 12.sp, color = K.dim)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Moovit's Live Directions: the green bar with arrival time and duration, the white step dots
+ * under it, a dark banner with what to do now, the map, the step card with its grey or green
+ * header, and the row of pills along the bottom.
+ */
+@Composable
+private fun MvNavigate(
+    model: KavModel,
+    trip: Moovit.Itinerary,
+    r: Moovit.Resolved,
+    steps: List<Step>,
+    journey: uk.noammm.kav.ActiveJourney?,
+    chosen: Map<Int, Int>,
+    choose: (Int, Int) -> Unit,
+    now: Long,
+    currentStep: Int,
+    pager: androidx.compose.foundation.pager.PagerState,
+    following: Boolean,
+    onStop: () -> Unit,
+    onExit: () -> Unit,
+    onPlan: () -> Unit,
+    bottomInset: androidx.compose.ui.unit.Dp,
+) {
+    val scope = rememberCoroutineScope()
+    val fix = model.fix
+    BoxWithConstraints(Modifier.fillMaxSize().background(K.bg)) {
+        val contentHeight = (maxHeight - bottomInset).coerceAtLeast(0.dp)
+        val cardHeight = (contentHeight * .30f).coerceIn(150.dp, 240.dp)
+        Column(Modifier.fillMaxSize()) {
+            val arrive = journey?.let { liveArrival(steps, currentStep, it, fix, now).first } ?: trip.arr
+            MvTopBar(
+                T("Live Directions", "ניווט LIVE"), onBack = onExit, color = Mv.green, centred = true,
+                subtitle = T.ltr("${hm.format(Date(arrive * 1000))} • ${dur((arrive - now).toInt().coerceAtLeast(0))}"),
+            ) {
+                RerouteToggle(glass = false, dest = trip.legs.lastOrNull { it.shape.isNotEmpty() }?.shape?.lastOrNull())
+                MvIconButton(T("Show trip plan", "הצגת המסלול"), onPlan) { PlanGlyph(Color.White) }
+            }
+            MvStepDots(pager.currentPage, steps.size, currentStep) { target ->
+                scope.launch { pager.animateScrollToPage(target) }
+            }
+            if (journey != null) {
+                val shown = pager.currentPage.coerceIn(0, steps.lastIndex)
+                MvBanner(stepInstruction(steps[shown], journey, shown == steps.lastIndex - 1, now, fix).first)
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                NavigateMap(trip, r, steps.getOrNull(pager.settledPage), chosen, model.here, fix, model.heading, now,
+                    following = following,
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 12.dp, bottom = cardHeight + 12.dp))
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                    RerouteBanner(Modifier.padding(bottom = K.gap2))
+                    val ceiling = with(LocalDensity.current) { cardHeight.roundToPx() }
+                    val pageHeights = remember(steps) { mutableStateMapOf<Int, Int>() }
+                    HorizontalPager(
+                        state = pager,
+                        modifier = Modifier.pageSized(pager, pageHeights, ceiling, bottom = true),
+                        contentPadding = PaddingValues(horizontal = K.gap3),
+                        pageSpacing = K.gap2,
+                        verticalAlignment = Alignment.Bottom,
+                        beyondViewportPageCount = 1,
+                    ) { page ->
+                        Column(Modifier.fillMaxWidth().onSizeChanged { pageHeights[page] = it.height }.animateContentSize()) {
+                            StepCard(steps[page], r, active = page == currentStep, now = now, chosen = chosen, fix = fix, onChoose = choose)
+                        }
+                    }
+                }
+            }
+            // Moovit's action row: Stop in red, then blue pills.
+            Row(
+                Modifier.fillMaxWidth().background(K.surface1).padding(bottom = bottomInset)
+                    .padding(horizontal = K.gap3, vertical = K.gap2),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(K.gap2),
+            ) {
+                MvPill(T("End", "סיום"), Mv.red, icon = { tint -> MvStopGlyph(tint) }, onClick = onStop)
+                // GPS can't always tell where you are (underground rail, tunnels): looking at another
+                // step, one tap makes it the current one, and everything follows it.
+                val page = pager.currentPage
+                if (page != currentStep && journey != null) {
+                    MvPill(T("I'm here", "אני כאן"), Mv.blue) { model.journeyStep = page }
+                }
+                Spacer(Modifier.weight(1f))
+                Text(T.ltr("${pager.currentPage + 1} / ${steps.size}"), fontSize = 13.sp, color = K.dim)
             }
         }
     }
@@ -532,14 +631,14 @@ private fun StopLine(name: String, code: String?, mode: Mode?, platform: String 
 }
 
 @Composable
-private fun PlanGlyph() {
+private fun PlanGlyph(tint: Color = K.text) {
     Canvas(Modifier.size(18.dp)) {
         val w = size.width; val h = size.height; val sw = w * .09f
         val x = w * .18f
-        drawLine(K.text, Offset(x, h * .18f), Offset(x, h * .82f), sw, StrokeCap.Round)
+        drawLine(tint, Offset(x, h * .18f), Offset(x, h * .82f), sw, StrokeCap.Round)
         listOf(.18f, .50f, .82f).forEach { y ->
-            drawCircle(K.text, w * .13f, Offset(x, h * y))
-            drawLine(K.text, Offset(w * .42f, h * y), Offset(w * .88f, h * y), sw, StrokeCap.Round)
+            drawCircle(tint, w * .13f, Offset(x, h * y))
+            drawLine(tint, Offset(w * .42f, h * y), Offset(w * .88f, h * y), sw, StrokeCap.Round)
         }
     }
 }
@@ -611,6 +710,10 @@ private fun LineRow(ride: Moovit.Leg, r: Moovit.Resolved) {
     val rt = if (info != null) r.routeType(agency) else 3
     val plate = plateFor(rt, agency)
     Row(verticalAlignment = Alignment.CenterVertically) {
+        if (Mv.on) MvBadge(
+            rt, agency, ride.shortName.ifBlank { null } ?: info?.number?.ifBlank { null } ?: "#${ride.lineId}",
+            mvLineColour(rt, agency, r.agencyName(agency)), big = true,
+        ) else
         Column(
             Modifier.width(IntrinsicSize.Min).clip(RoundedCornerShape(7.dp)).background(plate?.fill ?: K.plate)
                 .border(1.dp, plate?.edge ?: K.borderStrong, RoundedCornerShape(7.dp)),
@@ -647,6 +750,7 @@ private fun Card(
     Column(
         Modifier.fillMaxWidth().glassSurface(K.rCard),
     ) {
+        if (Mv.on) MvStepHeader(header, trailing, active) else
         Row(
             Modifier.fillMaxWidth().background(if (active) K.live.copy(alpha = .18f) else Color.Transparent)
                 .padding(horizontal = K.gap3, vertical = 8.dp),

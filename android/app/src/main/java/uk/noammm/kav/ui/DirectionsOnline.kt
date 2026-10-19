@@ -2,6 +2,8 @@
 
 package uk.noammm.kav.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,7 +11,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -463,7 +467,8 @@ fun DirectionsOnline(model: KavModel) {
             Modifier.fillMaxSize(),
             state = resultsState,
             contentPadding = PaddingValues(bottom = K.gap6 + LocalBottomBarInset.current),
-            verticalArrangement = Arrangement.spacedBy(K.gap2),
+            // Moovit: the plan header and the "Leave now" row form one charcoal block.
+            verticalArrangement = Arrangement.spacedBy(if (Mv.on) 0.dp else K.gap2),
         ) {
             item(key = "trip") {
                 PlanHeader(
@@ -497,7 +502,9 @@ fun DirectionsOnline(model: KavModel) {
             }
             if (timeType != Moovit.TIME_LAST && fromLL != null && toLL != null && error != TOO_CLOSE) item(key = "shift") {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = K.gap3, vertical = K.gap1),
+                    Modifier.fillMaxWidth()
+                        .then(if (Mv.on) Modifier.background(K.surface1).padding(vertical = K.gap1) else Modifier)
+                        .padding(horizontal = K.gap3, vertical = K.gap1),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     fun nudge(delta: Long) {
@@ -556,12 +563,14 @@ fun DirectionsOnline(model: KavModel) {
                 }
                 else -> {
                     items(shown.size) { i ->
-                        Column(Modifier.padding(horizontal = K.gap3)) {
+                        Column(Modifier.padding(horizontal = K.gap3).then(if (Mv.on) Modifier.padding(top = K.gap3) else Modifier)) {
                             val heading = plan.heading(shown[i])
                             if (heading.isNotBlank() && (i == 0 || plan.heading(shown[i - 1]) != heading)) {
                                 Text(
-                                    heading, style = DisplayItalic, fontSize = 12.sp, color = K.dim,
-                                    modifier = Modifier.padding(start = K.gap1, top = K.gap3, bottom = 2.dp),
+                                    heading,
+                                    style = if (Mv.on) DisplayItalic.copy(fontWeight = FontWeight.Medium) else DisplayItalic,
+                                    fontSize = if (Mv.on) 14.sp else 12.sp, color = if (Mv.on) K.muted else K.dim,
+                                    modifier = Modifier.padding(start = K.gap1, top = K.gap3, bottom = if (Mv.on) K.gap2 else 2.dp),
                                 )
                             }
                             Box(Modifier.popIn(i, raw to sort)) {
@@ -578,7 +587,7 @@ fun DirectionsOnline(model: KavModel) {
                 }
             }
         }
-        ScrollEdge(resultsState.canScrollBackward)
+        if (!Mv.on) ScrollEdge(resultsState.canScrollBackward)
     }
 
 
@@ -683,6 +692,13 @@ internal fun sameLines(candidate: Moovit.Itinerary, named: List<MoovitLink.Ride>
 
 @Composable
 internal fun ShiftButton(label: String, onClick: () -> Unit) {
+    if (Mv.on) return Text(
+        label, fontSize = 13.sp, color = Mv.link, fontWeight = FontWeight.Medium,
+        modifier = Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(K.rPill))
+            .border(1.dp, Mv.link, androidx.compose.foundation.shape.RoundedCornerShape(K.rPill))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+    )
     Text(
         label, fontSize = 12.sp, color = K.text,
         modifier = Modifier.panel(K.rPill)

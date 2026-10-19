@@ -271,6 +271,9 @@ private fun ShieldGlyph(tint: Color, size: Dp = 18.dp) {
 
 @Composable
 private fun Group(title: String) {
+    if (Mv.on) return Box(Modifier.padding(top = K.gap4, bottom = K.gap2)) {
+        MvSection(title.replaceFirstChar { it.titlecase(T.locale) })
+    }
     Text(
         title, style = DisplayItalic, fontSize = 12.sp, color = K.dim,
         modifier = Modifier.padding(start = K.gap4, end = K.gap4, top = K.gap5, bottom = K.gap2),
@@ -371,7 +374,9 @@ private fun PackChoices(inset: Dp) {
         }
     }
     Text(
-        T("Colours, corners and surfaces. Light, dark and OLED work with every pack.",
+        if (Mv.on) T("Moovit's screens, layouts and colours, with everything Kav adds. Light, dark and OLED work with every pack.",
+            "המסכים, הפריסות והצבעים של Moovit, עם כל מה ש-Kav מוסיפה. בהיר, כהה ו-OLED עובדים עם כל ערכה.")
+        else T("Colours, corners and surfaces. Light, dark and OLED work with every pack.",
             "צבעים, פינות ומשטחים. בהיר, כהה ו-OLED עובדים עם כל ערכה."),
         fontSize = 11.sp, color = K.dim, modifier = Modifier.padding(horizontal = inset).padding(start = 2.dp, top = 6.dp),
     )
