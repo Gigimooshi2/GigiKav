@@ -29,7 +29,7 @@ import uk.noammm.kav.ui.FavouriteIcons
 import uk.noammm.kav.ui.K
 import uk.noammm.kav.ui.T
 
-/** Lets you pick which saved places a Kav places widget shows. */
+/** Lets you pick which saved places a places widget shows, or the one place a 1×1 live widget follows. */
 class WidgetConfigActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,9 +44,13 @@ class WidgetConfigActivity : ComponentActivity() {
         K.pack = Prefs.pack(this)
         K.applyTheme(Prefs.look(this))
 
+        val single = LiveWidgets.isSingle(this, id)
+        val live = id in LiveWidgets.liveIds(this)
         setContent {
             var favs by remember { mutableStateOf(Prefs.favourites(this)) }
             var hidden by remember { mutableStateOf(PlacesWidget.hidden(this, id)) }
+            var chosen by remember { mutableStateOf(LiveWidgets.dest(this, id)) }
+            var count by remember { mutableIntStateOf(LiveWidgets.count(this, id)) }
             // Coming back from the app after adding a place: pick it up.
             val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
             DisposableEffect(owner) {
@@ -59,17 +63,25 @@ class WidgetConfigActivity : ComponentActivity() {
             Column(
                 Modifier.fillMaxSize().background(K.bg).systemBarsPadding().padding(16.dp),
             ) {
-                Text(T("Widget places", "מקומות בווידג׳ט"), fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = K.text)
+                Text(
+                    if (single) T("Widget place", "מקום בווידג׳ט") else T("Widget places", "מקומות בווידג׳ט"),
+                    fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = K.text,
+                )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    T("Choose which saved places show on this widget.", "בחרו אילו מקומות שמורים יופיעו בווידג׳ט."),
+                    if (single) T("Choose the place this widget shows the next bus to. Tap the widget to search it live.",
+                        "בחרו את המקום שהווידג׳ט יציג את האוטובוס הבא אליו. הקישו על הווידג׳ט לחיפוש בזמן אמת.")
+                    else T("Choose which saved places show on this widget.", "בחרו אילו מקומות שמורים יופיעו בווידג׳ט."),
                     fontSize = 14.sp, color = K.dim,
                 )
                 Spacer(Modifier.height(16.dp))
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(favs, key = { it.id }) { f ->
-                        val shown = f.id !in hidden
-                        fun toggle() { hidden = if (shown) hidden + f.id else hidden - f.id }
+                        val shown = if (single) chosen == f.id else f.id !in hidden
+                        fun toggle() {
+                            if (single) chosen = f.id
+                            else hidden = if (shown) hidden + f.id else hidden - f.id
+                        }
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
                                 .background(Color.White.copy(alpha = .06f))
@@ -89,9 +101,41 @@ class WidgetConfigActivity : ComponentActivity() {
                                     fontSize = 12.sp, color = K.dim, maxLines = 1,
                                 )
                             }
-                            Switch(
+                            if (single) androidx.compose.material3.RadioButton(
+                                selected = shown, onClick = { toggle() },
+                                colors = androidx.compose.material3.RadioButtonDefaults.colors(selectedColor = K.accent),
+                            )
+                            else Switch(
                                 checked = shown, onCheckedChange = { toggle() },
                                 colors = SwitchDefaults.colors(checkedTrackColor = K.accent, checkedThumbColor = Color.White),
+                            )
+                        }
+                    }
+                }
+                if (live) {
+                    Spacer(Modifier.height(12.dp))
+                    // How many upcoming buses to keep per place; the widget's ‹ › arrows step through them.
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                            .background(Color.White.copy(alpha = .06f)).padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(T("Next buses to show", "כמה אוטובוסים קרובים להציג"), fontSize = 16.sp, color = K.text)
+                            Text(
+                                T("Step through them with the widget's ‹ › arrows", "מעבר ביניהם בחיצים ‹ › שבווידג׳ט"),
+                                fontSize = 12.sp, color = K.dim,
+                            )
+                        }
+                        for ((label, by) in listOf("−" to -1, "+" to 1)) {
+                            if (by > 0) Text("$count", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = K.text,
+                                modifier = Modifier.padding(horizontal = 10.dp))
+                            Text(
+                                label, fontSize = 20.sp, color = K.text,
+                                modifier = Modifier.size(40.dp).clip(RoundedCornerShape(20.dp))
+                                    .background(Color.White.copy(alpha = .08f))
+                                    .clickable { count = (count + by).coerceIn(1, 6) }
+                                    .wrapContentSize(),
                             )
                         }
                     }
@@ -113,10 +157,21 @@ class WidgetConfigActivity : ComponentActivity() {
                     T("Save", "שמירה"),
                     fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                        .background(K.accent)
+                        .background(if (single && chosen == null) K.surface4 else K.accent)
                         .clickable {
-                            PlacesWidget.setHidden(this@WidgetConfigActivity, id, hidden)
-                            PlacesWidget.refresh(this@WidgetConfigActivity)
+                            val c = this@WidgetConfigActivity
+                            if (single) {
+                                val pick = chosen ?: return@clickable
+                                LiveWidgets.setDest(c, id, pick)
+                            } else {
+                                PlacesWidget.setHidden(c, id, hidden)
+                                PlacesWidget.refresh(c)
+                            }
+                            // Live widgets: draw now, fetch times, and keep them coming.
+                            if (live) {
+                                LiveWidgets.setCount(c, id, count)
+                                LiveWidgets.render(c, id); LiveWidgets.schedule(c, id); LiveWidgets.refreshNow(c, id)
+                            }
                             setResult(RESULT_OK, result)
                             finish()
                         }

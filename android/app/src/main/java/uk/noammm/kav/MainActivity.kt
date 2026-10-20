@@ -140,6 +140,7 @@ class MainActivity : ComponentActivity() {
             while (true) {
                 for (id in TripWidget.liveIds(this@MainActivity)) runCatching { TripWidgetWorker.run(this@MainActivity, id) }
                 for (id in StationWidget.liveIds(this@MainActivity)) runCatching { StationWidgetWorker.run(this@MainActivity, id) }
+                for (id in LiveWidgets.liveIds(this@MainActivity)) runCatching { LiveWidgetWorker.run(this@MainActivity, id) }
                 kotlinx.coroutines.delay(60_000)
             }
         }
@@ -148,7 +149,7 @@ class MainActivity : ComponentActivity() {
         widgetJob?.cancel(); widgetJob = null
         super.onStop()
         AutoUpdate.visible = false
-        if (!isChangingConfigurations) { AutoUpdate.soon(this); TripWidget.refreshAll(this); StationWidget.refreshAll(this) }
+        if (!isChangingConfigurations) { AutoUpdate.soon(this); TripWidget.refreshAll(this); StationWidget.refreshAll(this); LiveWidgets.refreshAll(this) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1425,5 +1426,6 @@ object Prefs {
         }
         store(ctx).edit().putString("favourites", arr.toString()).apply()
         PlacesWidget.refresh(ctx)
+        LiveWidgets.refreshAll(ctx)
     }
 }
