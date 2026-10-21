@@ -301,7 +301,7 @@ class TripWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
     // Freshest position available: the phone's own (needs "allow all the time" in the background),
     // else where Kav last saw you within the past few hours.
     @SuppressLint("MissingPermission")
-    private fun here(ctx: Context): Pair<Double, Double>? {
+    internal fun here(ctx: Context): Pair<Double, Double>? {
         if (hasLocationPermission(ctx)) runCatching {
             val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
             lm.getProviders(true).mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }

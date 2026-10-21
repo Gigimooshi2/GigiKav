@@ -191,6 +191,22 @@
                 android:resource="@xml/widget_places_info" />
         </receiver>
 
+        <!-- live places widget: every saved place with its next bus and the walk to it -->
+        <receiver android:name=".LivePlacesWidget" android:exported="false" android:label="Kav live places">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_live_places_info" />
+        </receiver>
+        <!-- 1x1: one saved place, its next bus, one tap to the live search -->
+        <receiver android:name=".LivePlaceWidget" android:exported="false" android:label="Kav live place">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_live_place_info" />
+        </receiver>
+        <receiver android:name=".LiveWidgetRefresh" android:exported="false" />
+
         <!-- the downloaded update, readable by the installer and nobody else -->
         <provider
             android:name="androidx.core.content.FileProvider"

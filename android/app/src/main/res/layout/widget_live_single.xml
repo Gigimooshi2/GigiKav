@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/live_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="4dp">
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <TextView
+            android:id="@+id/live_prev"
+            android:layout_width="20dp"
+            android:layout_height="28dp"
+            android:background="@drawable/widget_item_bg"
+            android:contentDescription="Previous bus"
+            android:gravity="center"
+            android:text="‹"
+            android:textColor="#CCFFFFFF"
+            android:textSize="16sp"
+            android:visibility="gone" />
+        <ImageView
+            android:id="@+id/live_icon"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:background="@drawable/widget_icon_bg"
+            android:padding="5dp"
+            android:scaleType="fitCenter"
+            android:importantForAccessibility="no" />
+        <TextView
+            android:id="@+id/live_next"
+            android:layout_width="20dp"
+            android:layout_height="28dp"
+            android:background="@drawable/widget_item_bg"
+            android:contentDescription="Next bus"
+            android:gravity="center"
+            android:text="›"
+            android:textColor="#CCFFFFFF"
+            android:textSize="16sp"
+            android:visibility="gone" />
+    </LinearLayout>
+    <TextView
+        android:id="@+id/live_bus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="#FFFFFFFF"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+    <TextView
+        android:id="@+id/live_walk"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="#B3FFFFFF"
+        android:textSize="10sp" />
+    <TextView
+        android:id="@+id/live_page"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="#80FFFFFF"
+        android:textSize="8sp"
+        android:visibility="gone" />
+</LinearLayout>

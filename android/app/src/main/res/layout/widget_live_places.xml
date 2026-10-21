@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:orientation="horizontal"
+    android:paddingStart="6dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+    <FrameLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+            <LinearLayout
+                android:id="@+id/live_row"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="horizontal" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:orientation="horizontal">
+                <TextView
+                    android:id="@+id/live_prev"
+                    android:layout_width="40dp"
+                    android:layout_height="24dp"
+                    android:background="@drawable/widget_item_bg"
+                    android:contentDescription="Previous bus"
+                    android:gravity="center"
+                    android:text="‹"
+                    android:textColor="#CCFFFFFF"
+                    android:textSize="18sp"
+                    android:visibility="gone" />
+                <TextView
+                    android:id="@+id/live_page"
+                    android:layout_width="wrap_content"
+                    android:layout_height="24dp"
+                    android:gravity="center"
+                    android:minWidth="36dp"
+                    android:textColor="#99FFFFFF"
+                    android:textSize="11sp"
+                    android:visibility="gone" />
+                <TextView
+                    android:id="@+id/live_next"
+                    android:layout_width="40dp"
+                    android:layout_height="24dp"
+                    android:background="@drawable/widget_item_bg"
+                    android:contentDescription="Next bus"
+                    android:gravity="center"
+                    android:text="›"
+                    android:textColor="#CCFFFFFF"
+                    android:textSize="18sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView
+            android:id="@+id/live_note"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:padding="8dp"
+            android:textColor="#B3FFFFFF"
+            android:textSize="13sp"
+            android:visibility="gone" />
+    </FrameLayout>
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:layout_marginEnd="6dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+        <ImageView
+            android:id="@+id/live_edit"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:alpha="0.6"
+            android:background="@drawable/widget_item_bg"
+            android:contentDescription="Edit widget"
+            android:padding="8dp"
+            android:scaleType="fitCenter" />
+        <ImageView
+            android:id="@+id/live_refresh"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:alpha="0.6"
+            android:background="@drawable/widget_item_bg"
+            android:contentDescription="Refresh"
+            android:padding="8dp"
+            android:scaleType="fitCenter" />
+    </LinearLayout>
+</LinearLayout>
