@@ -80,6 +80,10 @@ class TripService : Service() {
         tracking = null
         if (running === this) running = null
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        // Trip over: nothing of it stays in the shade (arrival / get-off alert, faster-route offer).
+        runCatching { NotificationManagerCompat.from(this).cancel(ID) }
+        runCatching { NotificationManagerCompat.from(this).cancel(ALERT_ID) }
+        Reroute.clear(this)
         super.onDestroy()
     }
 
