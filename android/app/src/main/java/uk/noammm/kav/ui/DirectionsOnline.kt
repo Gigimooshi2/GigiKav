@@ -329,6 +329,19 @@ fun DirectionsOnline(model: KavModel) {
         open = OpenTrip(o.trip, o.resolved, fromLabel, toLabel, resume = true)
     }
 
+    // Trip ended away from its End button (30 s after arriving, or End on the notification): leave
+    // its screen and keep it in recent trips, just as the button does.
+    var followed by remember { mutableStateOf<Moovit.Itinerary?>(null) }
+    LaunchedEffect(model.activeJourney?.trip) {
+        val was = followed
+        followed = model.activeJourney?.trip
+        if (followed == null && was != null && open?.trip === was) {
+            toPlace?.let { Prefs.rememberTrip(ctx, fromPlace, it, System.currentTimeMillis(), was) }
+            open = null
+            showResults = false
+        }
+    }
+
     // Same route, one departure earlier or later (like Moovit's single-route page).
     fun shiftOpen(dir: Int) {
         val cur = open ?: return
