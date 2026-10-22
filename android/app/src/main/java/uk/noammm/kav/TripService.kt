@@ -43,6 +43,14 @@ class TripService : Service() {
         }
     }
     private val settle = Runnable { post() }
+    // Arrived: give it half a minute (in case the GPS jumped ahead), then end the trip and its notification.
+    private var arrivalPending = false
+    private val arrived = Runnable { arrivalPending = false; if (atArrival()) end() }
+
+    private fun atArrival(): Boolean {
+        val (journey, step) = journey() ?: return false
+        return step >= buildSteps(journey.trip, journey.fromLabel, journey.toLabel).lastIndex
+    }
 
     override fun onBind(intent: Intent?) = null
 
@@ -139,6 +147,13 @@ class TripService : Service() {
             return
         }
         val n = notice() ?: run { finish(); return }
+        if (atArrival()) {
+            if (!arrivalPending) { arrivalPending = true; handler.postDelayed(arrived, ARRIVED_MS) }
+        } else if (arrivalPending) {
+            // Stepped back ("I'm here" on an earlier step): not arrived after all.
+            arrivalPending = false
+            handler.removeCallbacks(arrived)
+        }
         if (n == shown) return
         shown = n
         postedAt = System.currentTimeMillis()
@@ -164,6 +179,7 @@ class TripService : Service() {
         private const val PROMOTED = "android.requestPromotedOngoing"
         private const val TICK_MS = 15_000L
         private const val MIN_GAP_MS = 2_000L
+        private const val ARRIVED_MS = 30_000L
 
         private var running: TripService? = null
 
