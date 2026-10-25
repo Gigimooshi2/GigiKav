@@ -966,18 +966,27 @@ private fun NavigateMap(
         MapFocus.AUTO -> emptyList()
     }
     val manual = view != MapFocus.AUTO && viewPoints.isNotEmpty()
+    val layoutDir = LocalLayoutDirection.current
+    // Frame everything clear of the button column on the end side (and a little off the other
+    // edges), so the bus, you and the stop never sit under the buttons.
+    val framePadding = PaddingValues(
+        start = contentPadding.calculateStartPadding(layoutDir) + K.gap3,
+        top = contentPadding.calculateTopPadding() + K.gap2,
+        end = contentPadding.calculateEndPadding(layoutDir) + K.gap3 + MAP_BUTTON + K.gap2,
+        bottom = contentPadding.calculateBottomPadding() + K.gap2,
+    )
     Box(modifier) {
         TileMap(if (manual) viewPoints else framedPoints, Modifier.fillMaxSize(),
+            padFraction = 0.14f,
             focusKey = Triple(step, chosenRide?.tripId, if (manual) view to nonce else null),
             fitMaxZoom = when {
                 manual && viewPoints.size == 1 -> 17f
                 step is Step.Walk || step is Step.Arrive -> 18.4f
                 else -> Geo.MAX_Z.toFloat()
             },
-            recenterOn = here, contentPadding = contentPadding, follow = if (manual) null else follow,
+            recenterOn = here, contentPadding = framePadding, follow = if (manual) null else follow,
             geometry = geometry, live = live,
         )
-        val layoutDir = LocalLayoutDirection.current
         Column(
             Modifier.align(Alignment.CenterEnd)
                 .padding(top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding())
@@ -1007,12 +1016,14 @@ private fun NavigateMap(
 
 private enum class MapFocus { AUTO, ME, BUS, NEXT, FINAL }
 
+private val MAP_BUTTON = 44.dp
+
 @Composable
 private fun MapViewButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, on: Boolean, enabled: Boolean, onClick: () -> Unit,
 ) {
     Box(
-        Modifier.size(44.dp).glassSurface(22.dp)
+        Modifier.size(MAP_BUTTON).glassSurface(22.dp)
             .then(if (on) Modifier.clip(RoundedCornerShape(22.dp)).background(K.accent.copy(alpha = .25f)) else Modifier)
             .semantics { contentDescription = label }
             .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
