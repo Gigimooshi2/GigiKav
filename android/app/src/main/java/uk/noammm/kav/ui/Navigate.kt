@@ -933,9 +933,23 @@ private fun NavigateMap(
 
     val walkArrow = follow != null && step is Step.Walk && heading != null
     val statusFlag = uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)
+    val dual = uk.noammm.kav.DualGps.enabled
     val live = MapGeometry(
         dots = buildList {
-            here?.let { (lat, lon) ->
+            if (dual) {
+                // Kav Beta: both sources, each in its colour; the main one solid, the other a ring.
+                for (src in uk.noammm.kav.DualGps.Source.entries) {
+                    val l = uk.noammm.kav.DualGps.last(src)?.takeIf { System.currentTimeMillis() - it.time < 60_000 } ?: continue
+                    val tint = gpsTint(src)
+                    if (src == uk.noammm.kav.DualGps.main) {
+                        add(MapDot(l.latitude, l.longitude, tint.copy(alpha = .18f), 16f))
+                        add(MapDot(l.latitude, l.longitude, K.bg, 8f))
+                        add(MapDot(l.latitude, l.longitude, tint, 6f))
+                    } else {
+                        add(MapDot(l.latitude, l.longitude, Color.Transparent, 6f, tint, 2.5f))
+                    }
+                }
+            } else here?.let { (lat, lon) ->
                 add(MapDot(lat, lon, K.text.copy(alpha = 0.16f * mePulse.value), 15f))
                 if (!walkArrow) {
                     add(MapDot(lat, lon, K.bg.copy(alpha = mePulse.value), 8f))
@@ -1005,6 +1019,7 @@ private fun NavigateMap(
             recenterOn = here, contentPadding = framePadding, follow = if (manual) null else follow,
             geometry = geometry, live = live,
         )
+        if (dual) GpsLegend(Modifier.align(Alignment.TopStart).padding(top = contentPadding.calculateTopPadding() + K.gap2, start = K.gap3))
         Column(
             Modifier.align(Alignment.CenterEnd)
                 .padding(top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding())
@@ -1033,6 +1048,50 @@ private fun NavigateMap(
 }
 
 private enum class MapFocus { AUTO, ME, BUS, NEXT, FINAL }
+
+private fun gpsTint(src: uk.noammm.kav.DualGps.Source) =
+    if (src == uk.noammm.kav.DualGps.Source.KAV) Color(0xFFFFA21A) else Color(0xFF4285F4)
+
+/** Kav Beta: which location is which, how far apart, and a tap to make one the main source. */
+@Composable
+private fun GpsLegend(modifier: Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val d = uk.noammm.kav.DualGps
+    Column(modifier.panel(14.dp).padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (src in uk.noammm.kav.DualGps.Source.entries) {
+                val main = d.main == src
+                val l = d.last(src)
+                Row(
+                    Modifier.clip(RoundedCornerShape(999.dp))
+                        .background(if (main) gpsTint(src).copy(alpha = .22f) else Color.Transparent)
+                        .clickable(role = Role.Button) { d.setMain(ctx, src) }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.size(10.dp).clip(RoundedCornerShape(5.dp))
+                            .then(if (main) Modifier.background(gpsTint(src)) else Modifier.border(2.dp, gpsTint(src), RoundedCornerShape(5.dp))),
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        src.label + (l?.let { " ±${it.accuracy.toInt()}m" } ?: T(" —", " —")),
+                        fontSize = 12.sp, color = K.text, fontWeight = if (main) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
+            }
+        }
+        val apart = d.apart()
+        Text(
+            listOfNotNull(
+                apart?.let { T("${it.toInt()} m apart", "${it.toInt()} מ׳ ביניהם") },
+                T("main: ", "ראשי: ") + d.main.label,
+                T("standing in", "מחליף").takeIf { d.standIn },
+            ).joinToString(" · "),
+            fontSize = 11.sp, color = K.dim, modifier = Modifier.padding(start = 4.dp),
+        )
+    }
+}
 
 private val MAP_BUTTON = 44.dp
 

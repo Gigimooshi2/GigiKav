@@ -13,6 +13,7 @@ In code: `Beta.flag("name")`, always false in Kav.
 | switch | what it does |
 |---|---|
 | `bus_status` | Tells a real bus (its own GPS) from Moovit's timetable placeholder parked at the first stop; shows Live / Live at first stop / Scheduled / Not seen yet / Cancelled on the wait step, the floating window and the map (placeholders drawn faded). |
+| `dual_gps` | Runs Kav's own location (Android GPS + network) and Google's fused location (Play services, Kav Beta only) side by side: both on the trip map (Kav amber, Google blue; main solid, other a ring) with a legend that shows accuracy and distance apart and switches the main source; Settings has the same switch. Every fix from both is logged (`fix` with `src`). If the main source is silent 15 s the other stands in (`gps_standin`). |
 
 ## Log
 

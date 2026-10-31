@@ -4,6 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Kav Beta (builds from beta/ branches; locally KAV_BETA=true). See beta/README.md.
+val kavBeta = System.getenv("KAV_BETA") == "true"
+
 android {
     namespace = "uk.noammm.kav"
     compileSdk = 36
@@ -16,7 +19,7 @@ android {
         versionCode = if (ci != null) 1000 + ci else 19
         // Builds from beta/ branches are "Kav Beta": their own app (installs beside Kav), version label,
         // update channel, remote switches and live log. Locally: KAV_BETA=true tools/android_build.sh …
-        val beta = System.getenv("KAV_BETA") == "true"
+        val beta = kavBeta
         versionName = if (ci != null) (if (beta) "2.0-beta.$ci" else "2.0-gigi.$ci") else if (beta) "2.0-beta" else "2.0"
         applicationId = if (beta) "uk.noammm.kav.beta" else "uk.noammm.kav"
         resValue("string", "app_name", if (beta) "Kav Beta" else "Kav")
@@ -60,6 +63,10 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
 
+    // Google's location (Play services) is Kav Beta only, for comparing it with Kav's own; the normal
+    // Kav gets an empty stand-in and no Google code at all.
+    sourceSets["main"].java.srcDir(if (kavBeta) "src/beta/java" else "src/prod/java")
+
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
 
@@ -76,6 +83,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.maplibre.gl:android-sdk:12.3.1")
+    if (kavBeta) implementation("com.google.android.gms:play-services-location:21.3.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

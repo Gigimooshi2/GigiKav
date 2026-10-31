@@ -220,18 +220,21 @@ object Beta {
         }, "KavBetaLogcat").apply { isDaemon = true }.start()
     }
 
-    private var lastFixLogged = 0L
+    private val lastFixLogged = HashMap<String, Long>()
 
-    /** A GPS fix, at most every 10 s: where, how sure, from which provider. */
-    fun fix(l: Location) {
-        if (!on) return
+    /** A location fix from [src] ("kav" or "google"), at most every 5 s per source: where, how sure, from what. */
+    fun fix(l: Location, src: String = "kav") {
+        if (!on || l.provider == "cached") return
         val now = System.currentTimeMillis()
-        if (now - lastFixLogged < 10_000) return
-        lastFixLogged = now
+        synchronized(lastFixLogged) {
+            if (now - (lastFixLogged[src] ?: 0L) < 5_000) return
+            lastFixLogged[src] = now
+        }
         log(
-            "fix", "lat" to "%.5f".format(java.util.Locale.US, l.latitude).toDouble(),
-            "lon" to "%.5f".format(java.util.Locale.US, l.longitude).toDouble(),
+            "fix", "src" to src, "lat" to "%.6f".format(java.util.Locale.US, l.latitude).toDouble(),
+            "lon" to "%.6f".format(java.util.Locale.US, l.longitude).toDouble(),
             "acc" to l.accuracy.toInt(), "spd" to "%.1f".format(java.util.Locale.US, l.speed).toDouble(),
+            "brg" to if (l.hasBearing()) l.bearing.toInt() else null,
             "prov" to l.provider, "age" to (now - l.time) / 1000,
         )
     }

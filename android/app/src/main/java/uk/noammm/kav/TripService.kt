@@ -110,7 +110,6 @@ class TripService : Service() {
 
     private fun onFix(location: Location) {
         if (location.provider == "cached") return
-        Beta.fix(location)
         val f = Fix(location.latitude, location.longitude, System.currentTimeMillis() / 1000, location.speed)
         fix = f
         val shell = TripBridge.fix

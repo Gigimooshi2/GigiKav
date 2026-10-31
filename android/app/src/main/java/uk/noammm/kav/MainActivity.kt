@@ -177,6 +177,7 @@ class MainActivity : ComponentActivity() {
         Reroute.load(this)
         Online.init(this)
         Beta.init(this)
+        DualGps.load(this)
         TripWidget.init(this)
         AutoUpdate.schedule(this)
         if (intent?.action == Reroute.ACTION_SWITCH) Reroute.accept(this)
@@ -558,7 +559,7 @@ private fun Shell(model: KavModel) {
     LaunchedEffect(journeyActive, lifecycle) {
         if (!journeyActive) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            val stop = trackLocation(ctx) { Beta.fix(it); model.locate(it.latitude, it.longitude, it.speed) }
+            val stop = trackLocation(ctx) { model.locate(it.latitude, it.longitude, it.speed) }
             try { awaitCancellation() } finally { stop() }
         }
     }
@@ -1055,6 +1056,18 @@ private fun freshLastKnown(ctx: Context, maxAgeMs: Long): Pair<Double, Double>? 
 } catch (e: SecurityException) { null }
 
 fun requestLocationOnce(ctx: Context, onResult: (Pair<Double, Double>) -> Unit) {
+    // Kav Beta with Google as the main source: ask Google first, Kav's own if Google has nothing.
+    if (DualGps.enabled && DualGps.main == DualGps.Source.GOOGLE) {
+        GoogleGps.once(ctx) { l ->
+            if (l != null) { Beta.fix(l, "google"); onResult(l.latitude to l.longitude) }
+            else requestKavLocationOnce(ctx, onResult)
+        }
+        return
+    }
+    requestKavLocationOnce(ctx, onResult)
+}
+
+private fun requestKavLocationOnce(ctx: Context, onResult: (Pair<Double, Double>) -> Unit) {
     if (!hasLocationPermission(ctx)) return
     // Only a recent last-known position is worth showing while the fresh fix comes in.
     freshLastKnown(ctx, 120_000L)?.let(onResult)
@@ -1088,6 +1101,17 @@ fun requestLocationOnce(ctx: Context, onResult: (Pair<Double, Double>) -> Unit) 
 }
 
 fun trackLocation(ctx: Context, onFix: (Location) -> Unit): () -> Unit {
+    // Kav Beta `dual_gps`: Kav's own and Google's side by side, the chosen one driving the app.
+    if (DualGps.enabled) {
+        val stopKav = trackKavLocation(ctx) { DualGps.got(DualGps.Source.KAV, it, onFix) }
+        val stopGoogle = GoogleGps.track(ctx) { DualGps.got(DualGps.Source.GOOGLE, it, onFix) }
+        return { stopKav(); stopGoogle() }
+    }
+    return trackKavLocation(ctx) { Beta.fix(it, "kav"); onFix(it) }
+}
+
+/** Kav's own location: Android's GPS and network providers. */
+fun trackKavLocation(ctx: Context, onFix: (Location) -> Unit): () -> Unit {
     if (!hasLocationPermission(ctx)) return {}
     val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return {}
     val listener = object : LocationListener {
