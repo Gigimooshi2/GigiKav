@@ -149,7 +149,7 @@ class MainActivity : ComponentActivity() {
         widgetJob?.cancel(); widgetJob = null
         super.onStop()
         AutoUpdate.visible = false
-        if (!isChangingConfigurations) { AutoUpdate.soon(this); TripWidget.refreshAll(this); StationWidget.refreshAll(this); LiveWidgets.refreshAll(this) }
+        if (!isChangingConfigurations) { Beta.sendNow(); AutoUpdate.soon(this); TripWidget.refreshAll(this); StationWidget.refreshAll(this); LiveWidgets.refreshAll(this) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -174,6 +174,7 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra(PlacesWidget.EXTRA_SET)?.let { PendingLink.favourite = it }
         Reroute.load(this)
         Online.init(this)
+        Beta.init(this)
         TripWidget.init(this)
         AutoUpdate.schedule(this)
         if (intent?.action == Reroute.ACTION_SWITCH) Reroute.accept(this)
@@ -508,6 +509,7 @@ private fun Shell(model: KavModel) {
                     refreshed.shapes + it.resolved.shapes, refreshed.pollSecs, refreshed.patterns,
                 ))
             }
+            model.activeJourney?.let { logLive(it, System.currentTimeMillis() / 1000) }
         }
     }
 
@@ -525,10 +527,24 @@ private fun Shell(model: KavModel) {
     }
 
     val journeyActive = model.activeJourney != null
+    // Kav Beta log: trips starting and ending, and each step you move to.
+    LaunchedEffect(journeyActive) { Beta.tripRunning = journeyActive }
+    LaunchedEffect(model.activeJourney?.trip) {
+        val j = model.activeJourney
+        if (j == null) Beta.log("trip", "running" to false)
+        else Beta.log("trip", "running" to true, "from" to j.fromLabel, "to" to j.toLabel,
+            "lines" to j.trip.rides.joinToString(" › ") { it.shortName }, "dep" to j.trip.dep, "arr" to j.trip.arr)
+    }
+    LaunchedEffect(model.journeyStep, model.activeJourney?.trip) {
+        val j = model.activeJourney ?: return@LaunchedEffect
+        val steps = buildSteps(j.trip, j.fromLabel, j.toLabel)
+        Beta.log("step", "i" to model.journeyStep, "of" to steps.size,
+            "kind" to steps.getOrNull(model.journeyStep)?.javaClass?.simpleName)
+    }
     LaunchedEffect(journeyActive, lifecycle) {
         if (!journeyActive) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            val stop = trackLocation(ctx) { model.locate(it.latitude, it.longitude, it.speed) }
+            val stop = trackLocation(ctx) { Beta.fix(it); model.locate(it.latitude, it.longitude, it.speed) }
             try { awaitCancellation() } finally { stop() }
         }
     }

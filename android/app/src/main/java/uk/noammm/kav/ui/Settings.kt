@@ -41,6 +41,11 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
         .padding(bottom = LocalBottomBarInset.current)) {
         ScreenHeader(T("Your", "ההגדרות"), T("settings", "שלכם"), back = onClose)
 
+        if (uk.noammm.kav.Beta.on) {
+            Group(T("kav beta", "kav beta"))
+            BetaSection(ctx)
+        }
+
         Group(T("language", "שפה"))
         LanguageRow(ctx)
 
@@ -355,6 +360,68 @@ private fun PlacesKeyRow(ctx: android.content.Context) {
     }
 }
 
+
+/**
+ * Kav Beta: the live log's secret topic (to copy to whoever is reading it), pausing it, and the
+ * remote switches currently in force.
+ */
+@Composable
+private fun BetaSection(ctx: android.content.Context) {
+    val b = uk.noammm.kav.Beta
+    val topic = remember { b.topic(ctx) }
+    val hm = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+    Column(Modifier.padding(horizontal = K.gap4), verticalArrangement = Arrangement.spacedBy(K.gap2)) {
+        Text(
+            T("Live log", "יומן חי"), fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium,
+        )
+        Text(
+            T("While sharing is on, this beta sends what your trips do (steps, GPS fixes, Moovit's live data for your buses) " +
+                "to a private ntfy.sh topic. Copy its name to whoever reads it. It includes your location during trips.",
+                "כשהשיתוף פעיל, הבטא שולחת את מה שקורה בנסיעות (שלבים, מיקומי GPS, נתוני Moovit החיים של האוטובוסים) " +
+                "לנושא פרטי ב-ntfy.sh. העתיקו את שמו למי שקורא אותו. כולל את המיקום שלכם בזמן נסיעה."),
+            fontSize = 12.sp, color = K.dim, lineHeight = 16.sp,
+        )
+        Text(
+            topic, fontSize = 14.sp, color = K.text, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            modifier = Modifier.fillMaxWidth().panel(K.rControl)
+                .clickable {
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Kav Beta log", topic))
+                    android.widget.Toast.makeText(ctx, T("Copied", "הועתק"), android.widget.Toast.LENGTH_SHORT).show()
+                }
+                .padding(K.gap3),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (b.sharing) T("Sharing", "משתף") else T("Paused", "מושהה"),
+                fontSize = 14.sp, color = K.text, modifier = Modifier.weight(1f),
+            )
+            androidx.compose.material3.Switch(
+                checked = b.sharing, onCheckedChange = { b.setSharing(ctx, it) },
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = K.accent),
+            )
+        }
+        Text(
+            (if (b.lastSent > 0) T("Last sent ", "נשלח לאחרונה ") + hm.format(java.util.Date(b.lastSent)) else T("Nothing sent yet", "עוד לא נשלח")) +
+                " · " + uk.noammm.kav.data.Updates.installedVersion(ctx),
+            fontSize = 12.sp, color = K.dim,
+        )
+        Spacer(Modifier.height(K.gap2))
+        Text(T("Switches", "מתגים"), fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium)
+        Text(
+            if (b.flags.isEmpty()) T("None set", "אין") else b.flags.entries.joinToString("\n") { "${it.key}: ${it.value}" },
+            fontSize = 13.sp, color = K.muted, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+        )
+        Text(
+            if (b.flagsAt > 0) T("Checked ", "נבדק ") + hm.format(java.util.Date(b.flagsAt)) else T("Not checked yet", "עוד לא נבדק"),
+            fontSize = 12.sp, color = K.dim,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+            Chip(T("Check switches", "בדיקת מתגים"), false) { b.refreshFlags() }
+            Chip(T("Send log now", "שליחת היומן"), false) { b.sendNow() }
+        }
+    }
+}
 
 @Composable
 private fun PackChoices(inset: Dp) {

@@ -563,6 +563,20 @@ internal fun StepCard(
                             ),
                     ) {
                         LineRow(ride, r)
+                        if (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)) busStatus(r.arrival(ride), now)?.let { st ->
+                            Spacer(Modifier.height(K.gap2))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (st.state == BusState.LIVE || st.state == BusState.LIVE_AT_START) {
+                                    LiveGlyph(st.tint, 13.dp); Spacer(Modifier.width(6.dp))
+                                } else if (st.state == BusState.SCHEDULED) {
+                                    ClockGlyph(st.tint, 13.dp); Spacer(Modifier.width(6.dp))
+                                } else {
+                                    WarnGlyph(st.tint, 13.dp); Spacer(Modifier.width(6.dp))
+                                }
+                                Text(st.label, fontSize = 14.sp, color = st.tint, fontWeight = FontWeight.Medium,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
                         Spacer(Modifier.height(K.gap2))
                         val platform = r.platform(ride, wait)
                         if (platform.isNotBlank()) {
@@ -918,6 +932,7 @@ private fun NavigateMap(
     }
 
     val walkArrow = follow != null && step is Step.Walk && heading != null
+    val statusFlag = uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)
     val live = MapGeometry(
         dots = buildList {
             here?.let { (lat, lon) ->
@@ -928,9 +943,11 @@ private fun NavigateMap(
                 }
             }
             for (v in vehicles) {
-                val tint = if (v.vehicleStatus == 2) K.problem else K.live
-                add(MapDot(v.lat, v.lon, K.bg.copy(alpha = vehicleAlpha.value), 12f))
-                add(MapDot(v.lat, v.lon, tint.copy(alpha = vehicleAlpha.value), 10f))
+                val ghost = statusFlag && v.placeholder
+                val tint = if (ghost) K.dim else if (v.vehicleStatus == 2) K.problem else K.live
+                val a = vehicleAlpha.value * if (ghost) .55f else 1f
+                add(MapDot(v.lat, v.lon, K.bg.copy(alpha = a), 12f))
+                add(MapDot(v.lat, v.lon, tint.copy(alpha = a), 10f))
             }
         },
         markers = (
@@ -938,9 +955,10 @@ private fun NavigateMap(
                 listOf(MapMarker(lat, lon, MAP_ARROW_ICON, heading ?: 0f, mePulse.value, turns = true))
             }.orEmpty() else emptyList()
         ) + vehicles.map { v ->
-            MapMarker(v.lat, v.lon, modeIconName(vehicleModes[v.tripId] ?: Mode.BUS), alpha = vehicleAlpha.value)
+            MapMarker(v.lat, v.lon, modeIconName(vehicleModes[v.tripId] ?: Mode.BUS),
+                alpha = vehicleAlpha.value * if (statusFlag && v.placeholder) .55f else 1f)
         },
-        halos = vehicles.map { v ->
+        halos = vehicles.filterNot { statusFlag && it.placeholder }.map { v ->
             val tint = if (v.vehicleStatus == 2) K.problem else K.live
             MapDot(v.lat, v.lon, tint.copy(alpha = 0.20f * vehicleAlpha.value), 20f)
         },

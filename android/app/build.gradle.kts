@@ -9,13 +9,20 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "uk.noammm.kav"
         minSdk = 26
         targetSdk = 35
         // CI builds count up from 1000 so every build installs as an update.
         val ci = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
         versionCode = if (ci != null) 1000 + ci else 19
-        versionName = if (ci != null) "2.0-gigi.$ci" else "2.0"
+        // Builds from beta/ branches are "Kav Beta": their own app (installs beside Kav), version label,
+        // update channel, remote switches and live log. Locally: KAV_BETA=true tools/android_build.sh …
+        val beta = System.getenv("KAV_BETA") == "true"
+        versionName = if (ci != null) (if (beta) "2.0-beta.$ci" else "2.0-gigi.$ci") else if (beta) "2.0-beta" else "2.0"
+        applicationId = if (beta) "uk.noammm.kav.beta" else "uk.noammm.kav"
+        resValue("string", "app_name", if (beta) "Kav Beta" else "Kav")
+        buildConfigField("boolean", "BETA", beta.toString())
+        // Which branch the beta follows for its switches (flags.json).
+        buildConfigField("String", "BETA_BRANCH", "\"" + (System.getenv("GITHUB_REF_NAME") ?: "beta/dev") + "\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // MapLibre's renderer is native code. Every phone Kav can reach is arm64;
         // x86_64 stays so the release APK still installs on the emulator.
@@ -51,7 +58,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
 
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }

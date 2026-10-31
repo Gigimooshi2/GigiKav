@@ -158,8 +158,23 @@ object Moovit {
         val tripShapeId: Int = -1,
         val patternId: Int = -1,
         val platform: String = "",
+        /** Where the position comes from: 1 = the bus's own GPS, 2 = placed from the timetable. */
+        val locSource: Int = 0,
+        /** How far the bus is along to its next stop, 0–100. */
+        val toNextPct: Int = -1,
+        /** Timetabled seconds from the trip's first stop to this one. */
+        val fromStartSec: Int = -1,
     ) {
         val key get() = ArrivalKey(stopId, tripId)
+        /**
+         * Moovit puts every timetabled trip that hasn't started on the map at its first stop, with a
+         * made-up "SCHEDULED:…" vehicle. That is the timetable, not a bus.
+         */
+        val placeholder get() = tracked && (locSource == 2 || vehicleId.startsWith("SCHEDULED"))
+        /** A real bus reporting its own position. */
+        val realBus get() = hasLocation && !placeholder
+        /** When the trip is timetabled to leave its first stop (utc seconds), if Moovit says. */
+        val tripStartUtc get() = if (fromStartSec >= 0 && staticUtc > 0) staticUtc - fromStartSec else 0L
         fun departure(alert: Int = 0) = Departure(
             tripId, staticUtc, rtUtc, statisticalUtc, status, certainty, traffic,
             frequency, rtDropped, vehicleStatus, alert, platform,
@@ -285,6 +300,9 @@ object Moovit {
                         tripShapeId = (am[15] as? Int) ?: -1,
                         patternId = (am[1] as? Int) ?: -1,
                         platform = (am[6] as? String).orEmpty(),
+                        locSource = (v?.get(6) as? Int) ?: 0,
+                        toNextPct = (prog?.get(2) as? Int) ?: -1,
+                        fromStartSec = (am[10] as? Int) ?: -1,
                     )
                 }
             }
