@@ -375,10 +375,10 @@ private fun BetaSection(ctx: android.content.Context) {
             T("Live log", "יומן חי"), fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium,
         )
         Text(
-            T("While sharing is on, this beta sends what your trips do (steps, GPS fixes, Moovit's live data for your buses) " +
-                "to a private ntfy.sh topic. Copy its name to whoever reads it. It includes your location during trips.",
-                "כשהשיתוף פעיל, הבטא שולחת את מה שקורה בנסיעות (שלבים, מיקומי GPS, נתוני Moovit החיים של האוטובוסים) " +
-                "לנושא פרטי ב-ntfy.sh. העתיקו את שמו למי שקורא אותו. כולל את המיקום שלכם בזמן נסיעה."),
+            T("While sharing is on, this beta sends everything it does (its full log, crashes, Moovit requests, screens, " +
+                "searches, trips, your location) to a private ntfy.sh topic. Copy its name to whoever reads it.",
+                "כשהשיתוף פעיל, הבטא שולחת את כל מה שהיא עושה (היומן המלא, קריסות, בקשות ל-Moovit, מסכים, חיפושים, " +
+                "נסיעות, המיקום שלכם) לנושא פרטי ב-ntfy.sh. העתיקו את שמו למי שקורא אותו."),
             fontSize = 12.sp, color = K.dim, lineHeight = 16.sp,
         )
         Text(
@@ -419,6 +419,20 @@ private fun BetaSection(ctx: android.content.Context) {
         Row(horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
             Chip(T("Check switches", "בדיקת מתגים"), false) { b.refreshFlags() }
             Chip(T("Send log now", "שליחת היומן"), false) { b.sendNow() }
+        }
+        Text(
+            T("The full log stays on this phone for 7 days. Uploaded files are kept for 3 hours, so upload " +
+                "after a trip you want looked at and say so.",
+                "היומן המלא נשמר בטלפון 7 ימים. קבצים שהועלו נשמרים 3 שעות, אז העלו אחרי נסיעה שתרצו שייבדק ותגידו."),
+            fontSize = 12.sp, color = K.dim, lineHeight = 16.sp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+            for (h in listOf(3, 24)) Chip(T("Upload last $h h", "העלאת $h שע׳ אחרונות"), false) {
+                b.uploadLast(h) { ok ->
+                    android.widget.Toast.makeText(ctx, if (ok) T("Uploaded", "הועלה") else T("Upload failed", "ההעלאה נכשלה"),
+                        android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 }

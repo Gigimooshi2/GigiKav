@@ -135,6 +135,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         AutoUpdate.visible = true
+        Beta.log("app_open")
         widgetJob?.cancel()
         widgetJob = lifecycleScope.launch {
             while (true) {
@@ -149,6 +150,7 @@ class MainActivity : ComponentActivity() {
         widgetJob?.cancel(); widgetJob = null
         super.onStop()
         AutoUpdate.visible = false
+        Beta.log("app_close")
         if (!isChangingConfigurations) { Beta.sendNow(); AutoUpdate.soon(this); TripWidget.refreshAll(this); StationWidget.refreshAll(this); LiveWidgets.refreshAll(this) }
     }
 
@@ -293,7 +295,14 @@ class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
         T.switchTo(Prefs.lang(ctx))
     }
 
+    private var hereLogged = 0L
     fun locate(lat: Double, lon: Double, speed: Float = 0f) {
+        // Kav Beta: where the app thinks you are, at most every 30 s (trip fixes are logged in detail).
+        if (System.currentTimeMillis() - hereLogged > 30_000) {
+            hereLogged = System.currentTimeMillis()
+            Beta.log("here", "lat" to "%.5f".format(java.util.Locale.US, lat).toDouble(),
+                "lon" to "%.5f".format(java.util.Locale.US, lon).toDouble(), "spd" to speed.toDouble())
+        }
         here = lat to lon
         TripWidget.noteHere(lat, lon)
         fix = Fix(lat, lon, System.currentTimeMillis() / 1000, speed)
@@ -527,6 +536,11 @@ private fun Shell(model: KavModel) {
     }
 
     val journeyActive = model.activeJourney != null
+    // Kav Beta log: which screen is up.
+    LaunchedEffect(model.tab, model.settingsOpen, model.navigating, model.stationStop, model.lineRoute) {
+        Beta.log("screen", "tab" to model.tab.name, "settings" to model.settingsOpen, "navigating" to model.navigating,
+            "station" to model.stationStop, "line" to model.lineRoute)
+    }
     // Kav Beta log: trips starting and ending, and each step you move to.
     LaunchedEffect(journeyActive) { Beta.tripRunning = journeyActive }
     LaunchedEffect(model.activeJourney?.trip) {

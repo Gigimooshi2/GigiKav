@@ -14,13 +14,19 @@ In code: `Beta.flag("name")`, always false in Kav.
 |---|---|
 | `bus_status` | Tells a real bus (its own GPS) from Moovit's timetable placeholder parked at the first stop; shows Live / Live at first stop / Scheduled / Not seen yet / Cancelled on the wait step, the floating window and the map (placeholders drawn faded). |
 
-## Live log
+## Log
 
-Kav Beta batches events to a private ntfy.sh topic made on the phone (Settings → Kav Beta; never
-commit it). Read with `python3 tools/beta_log.py <topic> [--type live,fix,step,trip] [--since 12h]`.
-ntfy keeps messages ~12 hours. Events: `app`, `flags`, `trip`, `step`, `fix` (every 10 s on a trip:
-position, accuracy, provider), `live` (Moovit's record for each bus on the trip + the state Kav made
-of it), `sharing`.
+Kav Beta logs everything it does to a 7-day file on the phone and streams it to a private ntfy.sh
+topic made on the phone (Settings → Kav Beta; never commit it). Read with
+`python3 tools/beta_log.py <topic> [--type live,fix,step,trip,api,logcat] [--since 12h]`.
+
+- Stream: every 2 min on a trip, 10 min otherwise, slower if the day's 250-message ntfy budget runs
+  low. Small batches inline (kept ~12 h), bigger ones as gzip attachments (kept ~3 h).
+- Settings → "Upload last 3 h / 24 h" re-sends a stretch from the phone's file.
+- Events: `app`, `app_open`/`app_close`, `screen`, `flags`, `plan`/`plan_refused`, `trip`, `step`,
+  `here` (location, ≤ every 30 s), `fix` (trip GPS every 10 s: accuracy, provider), `live` (each bus
+  on the trip: Moovit's raw record `raw` plus the state Kav made of it), `api` (every Moovit request:
+  service, code, ms, bytes), `logcat` (Kav's whole Android log), `crash` (stack trace), `upload`.
 
 ## To prod
 

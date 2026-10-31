@@ -72,6 +72,7 @@ internal fun logLive(journey: uk.noammm.kav.ActiveJourney, now: Long) {
             "stopIdx" to a.stopIndex, "next" to a.nextStopIndex, "pct" to a.toNextPct,
             "sched" to a.staticUtc, "rt" to a.rtUtc, "start" to a.tripStartUtc, "cert" to a.certainty, "status" to a.status,
             "state" to st?.state?.name, "shown" to (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS) && st != null),
+            "raw" to Moovit.rawArrivals[Moovit.ArrivalKey(stop, leg.tripId)],
         )
     }
 }
