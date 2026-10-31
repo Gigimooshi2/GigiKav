@@ -318,7 +318,7 @@ class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
     suspend fun checkForUpdate(ctx: Context) {
         try {
             val installed = Updates.installedVersion(ctx)
-            val latest = withContext(Dispatchers.IO) { Updates.latest() }
+            val latest = withContext(Dispatchers.IO) { Updates.latest(Prefs.betaChannel(ctx)) }
             update = latest.takeIf { Updates.isNewer(it.version, installed) }
         } catch (e: CancellationException) {
             throw e
@@ -1289,6 +1289,10 @@ object Prefs {
         val kept = (listOf(key) + recentLines(ctx)).distinct().take(MAX_RECENT_LINES)
         store(ctx).edit().putString(RECENT_LINES, org.json.JSONArray(kept).toString()).apply()
     }
+
+    /** Beta channel: updates come from beta builds, and in a beta build the experiments and log run. */
+    fun betaChannel(ctx: Context): Boolean = store(ctx).getBoolean("betaChannel", false)
+    fun setBetaChannel(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("betaChannel", on).apply()
 
     fun accent(ctx: Context): Int {
         val a = store(ctx).getInt("accent", android.graphics.Color.rgb(0x9A, 0xBE, 0xFF))

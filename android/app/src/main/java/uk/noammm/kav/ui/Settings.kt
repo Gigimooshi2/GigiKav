@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -41,10 +42,9 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
         .padding(bottom = LocalBottomBarInset.current)) {
         ScreenHeader(T("Your", "ההגדרות"), T("settings", "שלכם"), back = onClose)
 
-        if (uk.noammm.kav.Beta.on) {
-            Group(T("kav beta", "kav beta"))
-            BetaSection(ctx)
-        }
+        Group(T("beta", "בטא"))
+        BetaChannelRow(model)
+        if (uk.noammm.kav.Beta.on) BetaSection(ctx)
 
         Group(T("language", "שפה"))
         LanguageRow(ctx)
@@ -360,6 +360,53 @@ private fun PlacesKeyRow(ctx: android.content.Context) {
     }
 }
 
+
+/**
+ * The beta channel: Kav updates itself to beta builds of itself (same app, so places, widgets and
+ * settings stay). Off again: experiments and the log stop at once; the next normal release replaces
+ * the beta build.
+ */
+@Composable
+private fun BetaChannelRow(model: KavModel) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val on = uk.noammm.kav.Beta.channel
+    Column(Modifier.padding(horizontal = K.gap4), verticalArrangement = Arrangement.spacedBy(K.gap2)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(T("Beta channel", "ערוץ בטא"), fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium)
+                Text(
+                    T("Get test builds with new experiments. Same app: your places, widgets and settings stay. " +
+                        "While on, the beta sends its full log, including your location, to a private topic for testing.",
+                        "קבלו גרסאות ניסיון עם ניסויים חדשים. אותה אפליקציה: המקומות, הווידג׳טים וההגדרות נשארים. " +
+                        "כשזה פעיל, הבטא שולחת את היומן המלא, כולל המיקום שלכם, לנושא פרטי לצורך בדיקות."),
+                    fontSize = 12.sp, color = K.dim, lineHeight = 16.sp,
+                )
+            }
+            Spacer(Modifier.width(K.gap3))
+            androidx.compose.material3.Switch(
+                checked = on,
+                onCheckedChange = { want ->
+                    uk.noammm.kav.Beta.setChannel(ctx, want)
+                    // Fetch the build for the channel now rather than at the next background check.
+                    model.updateDismissed = false
+                    scope.launch { model.checkForUpdate(ctx) }
+                    uk.noammm.kav.AutoUpdate.soon(ctx)
+                },
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = K.accent),
+            )
+        }
+        val note = when {
+            on && !uk.noammm.kav.BuildConfig.BETA ->
+                T("Getting the beta build: it installs as an update, like any other.", "מורידים את גרסת הבטא: היא מותקנת כעדכון, כמו כל עדכון.")
+            !on && uk.noammm.kav.BuildConfig.BETA ->
+                T("Experiments are off. The next normal release replaces this beta build.", "הניסויים כבויים. הגרסה הרגילה הבאה תחליף את גרסת הבטא.")
+            on -> T("Beta build ", "גרסת בטא ") + uk.noammm.kav.data.Updates.installedVersion(ctx)
+            else -> null
+        }
+        if (note != null) Text(note, fontSize = 12.sp, color = if (on) K.accent else K.dim)
+    }
+}
 
 /**
  * Kav Beta: the live log's secret topic (to copy to whoever is reading it), pausing it, and the

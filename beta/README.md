@@ -1,8 +1,15 @@
 # Kav Beta
 
-`beta/dev` is the development line. Every push to a `beta/**` branch builds **Kav Beta**
-(`uk.noammm.kav.beta`, installs beside Kav) and publishes it as a `beta-2.0.N` prerelease;
-Kav Beta updates itself from those. `main` is prod: Kav only follows full releases.
+`beta/dev` is the development line. Every push to a `beta/**` branch builds a **beta build of Kav
+itself** (same app id, same signing key, so places, widgets and settings carry over) and publishes it
+as a `beta-2.0.N` prerelease. `main` builds the normal releases.
+
+Settings → "Beta channel" (in every build) picks which Kav updates to. On: the newest beta build,
+and in a beta build the experiments, switches and log below run. Off: they stop at once, and the
+next normal release replaces the beta build (Android won't install an older build over a newer one,
+so there's no instant way back). Keep `beta/dev` merged up with `main` so beta users aren't behind.
+`Beta.on` = beta build && channel on; everything beta-only checks it, so the code can sit on `main`
+inert.
 
 ## Switches
 

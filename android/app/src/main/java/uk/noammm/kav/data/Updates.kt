@@ -42,11 +42,11 @@ object Updates {
     }
 
     /**
-     * Kav follows the latest release. Kav Beta follows the newest beta-* prerelease instead; the two
-     * are separate apps, so neither ever installs over the other.
+     * Kav follows the latest release; with Settings → "Beta channel" on it follows the newest beta-*
+     * prerelease instead (a beta build of the same app, so places, widgets and settings carry over).
      */
-    fun latest(): Release {
-        val o = if (uk.noammm.kav.BuildConfig.BETA) {
+    fun latest(beta: Boolean): Release {
+        val o = if (beta) {
             val list = org.json.JSONArray(get("releases?per_page=30"))
             (0 until list.length()).asSequence().mapNotNull { list.optJSONObject(it) }
                 .firstOrNull { !it.optBoolean("draft") && it.optString("tag_name").startsWith("beta-") }

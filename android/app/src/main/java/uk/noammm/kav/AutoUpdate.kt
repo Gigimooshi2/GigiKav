@@ -121,7 +121,7 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
             // GitHub allows 60 unauthenticated checks an hour; once every 30 min is plenty.
             if (now - Prefs.lastUpdateCheck(ctx) >= 30 * 60_000L) {
                 Prefs.setLastUpdateCheck(ctx, now)
-                val rel = Updates.latest()
+                val rel = Updates.latest(Prefs.betaChannel(ctx))
                 if (Updates.isNewer(rel.version, installed)) {
                     Updates.download(ctx, rel) { _, _ -> }
                     Prefs.setPendingUpdate(ctx, rel.version)

@@ -20,7 +20,7 @@ import java.security.SecureRandom
 import java.util.zip.GZIPOutputStream
 
 /**
- * Kav Beta only (BuildConfig.BETA). Two things the normal Kav never does:
+ * Beta builds with Settings → "Beta channel" on. Two things the normal Kav never does:
  *
  *  - Remote switches: experiments ship turned off and are flipped from `beta/flags.json` on the beta
  *    branch, re-read every few minutes, so a change can be tried and taken back without a new build.
@@ -33,7 +33,19 @@ import java.util.zip.GZIPOutputStream
  * In the normal Kav every flag is off and log() does nothing.
  */
 object Beta {
-    val on: Boolean get() = BuildConfig.BETA
+    /** This is a beta build and the beta channel is on. Off: everything here sleeps. */
+    val on: Boolean get() = BuildConfig.BETA && channel
+
+    /** Settings → "Beta channel". Compose state, so screens redraw when it flips. */
+    var channel by mutableStateOf(false)
+        private set
+
+    /** Turn the beta channel on or off; in a beta build the experiments and log start or stop at once. */
+    fun setChannel(ctx: Context, on: Boolean) {
+        Prefs.setBetaChannel(ctx, on)
+        if (on) { channel = true; init(ctx); log("channel", "on" to true) }
+        else { log("channel", "on" to false); sendNow(); channel = false }
+    }
 
     private const val OWNER = "Gigimooshi2"
     private const val REPO = "GigiKav"
@@ -85,6 +97,7 @@ object Beta {
     }
 
     fun init(ctx: Context) {
+        channel = Prefs.betaChannel(ctx)
         if (!on || loop != null) return
         val c = ctx.applicationContext
         appCtx = c
@@ -264,7 +277,7 @@ object Beta {
     }
 
     private fun flush(ctx: Context) {
-        if (!sharing) return
+        if (!sharing || !BuildConfig.BETA) return
         syncFile()
         val lines = synchronized(buffer) { buffer.toList().also { buffer.clear() } }
         if (lines.isEmpty()) return
