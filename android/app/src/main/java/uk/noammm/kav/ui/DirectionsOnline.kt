@@ -180,6 +180,11 @@ fun DirectionsOnline(model: KavModel) {
             }
             plan = res
             raw = res.laidOut()
+            uk.noammm.kav.Beta.log("plan", "from" to fromLL.toString(), "to" to toLL.toString(),
+                "toName" to toPlace?.name, "at" to departAt, "type" to timeType, "results" to raw.size,
+                "top" to raw.take(5).joinToString(" | ") { t ->
+                    t.rides.joinToString(">") { it.shortName } + " " + t.durationMin + "m dep " + t.dep
+                })
             linkTrip?.let { named ->
                 if (raw.none { exactTrip(it, named) }) {
                     res.itineraries.firstOrNull { exactTrip(it, named) }
@@ -201,6 +206,7 @@ fun DirectionsOnline(model: KavModel) {
             throw e
         } catch (e: Moovit.PlannerRefusal) {
             android.util.Log.i("KavPlan", "planner refused: ${e.code} ${e.title}")
+            uk.noammm.kav.Beta.log("plan_refused", "code" to e.code, "title" to e.title)
             error = when (e.code) {
                 Moovit.PLAN_TOO_CLOSE -> TOO_CLOSE
                 Moovit.PLAN_NO_ROUTES -> T(

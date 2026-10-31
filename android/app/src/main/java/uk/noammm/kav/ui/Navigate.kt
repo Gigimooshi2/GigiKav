@@ -563,6 +563,20 @@ internal fun StepCard(
                             ),
                     ) {
                         LineRow(ride, r)
+                        if (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)) busStatus(r.arrival(ride), now)?.let { st ->
+                            Spacer(Modifier.height(K.gap2))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (st.state == BusState.LIVE || st.state == BusState.LIVE_AT_START) {
+                                    LiveGlyph(st.tint, 13.dp); Spacer(Modifier.width(6.dp))
+                                } else if (st.state == BusState.SCHEDULED) {
+                                    ClockGlyph(st.tint, 13.dp); Spacer(Modifier.width(6.dp))
+                                } else {
+                                    WarnGlyph(st.tint, 13.dp); Spacer(Modifier.width(6.dp))
+                                }
+                                Text(st.label, fontSize = 14.sp, color = st.tint, fontWeight = FontWeight.Medium,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
                         Spacer(Modifier.height(K.gap2))
                         val platform = r.platform(ride, wait)
                         if (platform.isNotBlank()) {
@@ -918,9 +932,24 @@ private fun NavigateMap(
     }
 
     val walkArrow = follow != null && step is Step.Walk && heading != null
+    val statusFlag = uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)
+    val dual = uk.noammm.kav.DualGps.enabled
     val live = MapGeometry(
         dots = buildList {
-            here?.let { (lat, lon) ->
+            if (dual) {
+                // Kav Beta: both sources, each in its colour; the main one solid, the other a ring.
+                for (src in uk.noammm.kav.DualGps.Source.entries) {
+                    val l = uk.noammm.kav.DualGps.last(src)?.takeIf { System.currentTimeMillis() - it.time < 60_000 } ?: continue
+                    val tint = gpsTint(src)
+                    if (src == uk.noammm.kav.DualGps.main) {
+                        add(MapDot(l.latitude, l.longitude, tint.copy(alpha = .18f), 16f))
+                        add(MapDot(l.latitude, l.longitude, K.bg, 8f))
+                        add(MapDot(l.latitude, l.longitude, tint, 6f))
+                    } else {
+                        add(MapDot(l.latitude, l.longitude, Color.Transparent, 6f, tint, 2.5f))
+                    }
+                }
+            } else here?.let { (lat, lon) ->
                 add(MapDot(lat, lon, K.text.copy(alpha = 0.16f * mePulse.value), 15f))
                 if (!walkArrow) {
                     add(MapDot(lat, lon, K.bg.copy(alpha = mePulse.value), 8f))
@@ -928,9 +957,11 @@ private fun NavigateMap(
                 }
             }
             for (v in vehicles) {
-                val tint = if (v.vehicleStatus == 2) K.problem else K.live
-                add(MapDot(v.lat, v.lon, K.bg.copy(alpha = vehicleAlpha.value), 12f))
-                add(MapDot(v.lat, v.lon, tint.copy(alpha = vehicleAlpha.value), 10f))
+                val ghost = statusFlag && v.placeholder
+                val tint = if (ghost) K.dim else if (v.vehicleStatus == 2) K.problem else K.live
+                val a = vehicleAlpha.value * if (ghost) .55f else 1f
+                add(MapDot(v.lat, v.lon, K.bg.copy(alpha = a), 12f))
+                add(MapDot(v.lat, v.lon, tint.copy(alpha = a), 10f))
             }
         },
         markers = (
@@ -938,9 +969,10 @@ private fun NavigateMap(
                 listOf(MapMarker(lat, lon, MAP_ARROW_ICON, heading ?: 0f, mePulse.value, turns = true))
             }.orEmpty() else emptyList()
         ) + vehicles.map { v ->
-            MapMarker(v.lat, v.lon, modeIconName(vehicleModes[v.tripId] ?: Mode.BUS), alpha = vehicleAlpha.value)
+            MapMarker(v.lat, v.lon, modeIconName(vehicleModes[v.tripId] ?: Mode.BUS),
+                alpha = vehicleAlpha.value * if (statusFlag && v.placeholder) .55f else 1f)
         },
-        halos = vehicles.map { v ->
+        halos = vehicles.filterNot { statusFlag && it.placeholder }.map { v ->
             val tint = if (v.vehicleStatus == 2) K.problem else K.live
             MapDot(v.lat, v.lon, tint.copy(alpha = 0.20f * vehicleAlpha.value), 20f)
         },
@@ -987,6 +1019,7 @@ private fun NavigateMap(
             recenterOn = here, contentPadding = framePadding, follow = if (manual) null else follow,
             geometry = geometry, live = live,
         )
+        if (dual) GpsLegend(Modifier.align(Alignment.TopStart).padding(top = contentPadding.calculateTopPadding() + K.gap2, start = K.gap3))
         Column(
             Modifier.align(Alignment.CenterEnd)
                 .padding(top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding())
@@ -1015,6 +1048,50 @@ private fun NavigateMap(
 }
 
 private enum class MapFocus { AUTO, ME, BUS, NEXT, FINAL }
+
+private fun gpsTint(src: uk.noammm.kav.DualGps.Source) =
+    if (src == uk.noammm.kav.DualGps.Source.KAV) Color(0xFFFFA21A) else Color(0xFF4285F4)
+
+/** Kav Beta: which location is which, how far apart, and a tap to make one the main source. */
+@Composable
+private fun GpsLegend(modifier: Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val d = uk.noammm.kav.DualGps
+    Column(modifier.panel(14.dp).padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (src in uk.noammm.kav.DualGps.Source.entries) {
+                val main = d.main == src
+                val l = d.last(src)
+                Row(
+                    Modifier.clip(RoundedCornerShape(999.dp))
+                        .background(if (main) gpsTint(src).copy(alpha = .22f) else Color.Transparent)
+                        .clickable(role = Role.Button) { d.setMain(ctx, src) }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.size(10.dp).clip(RoundedCornerShape(5.dp))
+                            .then(if (main) Modifier.background(gpsTint(src)) else Modifier.border(2.dp, gpsTint(src), RoundedCornerShape(5.dp))),
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        src.label + (l?.let { " ±${it.accuracy.toInt()}m" } ?: T(" —", " —")),
+                        fontSize = 12.sp, color = K.text, fontWeight = if (main) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
+            }
+        }
+        val apart = d.apart()
+        Text(
+            listOfNotNull(
+                apart?.let { T("${it.toInt()} m apart", "${it.toInt()} מ׳ ביניהם") },
+                T("main: ", "ראשי: ") + d.main.label,
+                T("standing in", "מחליף").takeIf { d.standIn },
+            ).joinToString(" · "),
+            fontSize = 11.sp, color = K.dim, modifier = Modifier.padding(start = 4.dp),
+        )
+    }
+}
 
 private val MAP_BUTTON = 44.dp
 

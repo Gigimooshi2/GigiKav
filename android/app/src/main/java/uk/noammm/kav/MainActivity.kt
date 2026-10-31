@@ -135,6 +135,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         AutoUpdate.visible = true
+        Beta.log("app_open")
         widgetJob?.cancel()
         widgetJob = lifecycleScope.launch {
             while (true) {
@@ -149,7 +150,8 @@ class MainActivity : ComponentActivity() {
         widgetJob?.cancel(); widgetJob = null
         super.onStop()
         AutoUpdate.visible = false
-        if (!isChangingConfigurations) { AutoUpdate.soon(this); TripWidget.refreshAll(this); StationWidget.refreshAll(this); LiveWidgets.refreshAll(this) }
+        Beta.log("app_close")
+        if (!isChangingConfigurations) { Beta.sendNow(); AutoUpdate.soon(this); TripWidget.refreshAll(this); StationWidget.refreshAll(this); LiveWidgets.refreshAll(this) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -174,6 +176,8 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra(PlacesWidget.EXTRA_SET)?.let { PendingLink.favourite = it }
         Reroute.load(this)
         Online.init(this)
+        Beta.init(this)
+        DualGps.load(this)
         TripWidget.init(this)
         AutoUpdate.schedule(this)
         if (intent?.action == Reroute.ACTION_SWITCH) Reroute.accept(this)
@@ -292,7 +296,14 @@ class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
         T.switchTo(Prefs.lang(ctx))
     }
 
+    private var hereLogged = 0L
     fun locate(lat: Double, lon: Double, speed: Float = 0f) {
+        // Kav Beta: where the app thinks you are, at most every 30 s (trip fixes are logged in detail).
+        if (System.currentTimeMillis() - hereLogged > 30_000) {
+            hereLogged = System.currentTimeMillis()
+            Beta.log("here", "lat" to "%.5f".format(java.util.Locale.US, lat).toDouble(),
+                "lon" to "%.5f".format(java.util.Locale.US, lon).toDouble(), "spd" to speed.toDouble())
+        }
         here = lat to lon
         TripWidget.noteHere(lat, lon)
         fix = Fix(lat, lon, System.currentTimeMillis() / 1000, speed)
@@ -307,7 +318,7 @@ class KavModel(net: Net? = null, ctx: Context? = null) : ViewModel() {
     suspend fun checkForUpdate(ctx: Context) {
         try {
             val installed = Updates.installedVersion(ctx)
-            val latest = withContext(Dispatchers.IO) { Updates.latest() }
+            val latest = withContext(Dispatchers.IO) { Updates.latest(Prefs.betaChannel(ctx)) }
             update = latest.takeIf { Updates.isNewer(it.version, installed) }
         } catch (e: CancellationException) {
             throw e
@@ -508,6 +519,7 @@ private fun Shell(model: KavModel) {
                     refreshed.shapes + it.resolved.shapes, refreshed.pollSecs, refreshed.patterns,
                 ))
             }
+            model.activeJourney?.let { logLive(it, System.currentTimeMillis() / 1000) }
         }
     }
 
@@ -525,6 +537,25 @@ private fun Shell(model: KavModel) {
     }
 
     val journeyActive = model.activeJourney != null
+    // Kav Beta log: which screen is up.
+    LaunchedEffect(model.tab, model.settingsOpen, model.navigating, model.stationStop, model.lineRoute) {
+        Beta.log("screen", "tab" to model.tab.name, "settings" to model.settingsOpen, "navigating" to model.navigating,
+            "station" to model.stationStop, "line" to model.lineRoute)
+    }
+    // Kav Beta log: trips starting and ending, and each step you move to.
+    LaunchedEffect(journeyActive) { Beta.tripRunning = journeyActive }
+    LaunchedEffect(model.activeJourney?.trip) {
+        val j = model.activeJourney
+        if (j == null) Beta.log("trip", "running" to false)
+        else Beta.log("trip", "running" to true, "from" to j.fromLabel, "to" to j.toLabel,
+            "lines" to j.trip.rides.joinToString(" › ") { it.shortName }, "dep" to j.trip.dep, "arr" to j.trip.arr)
+    }
+    LaunchedEffect(model.journeyStep, model.activeJourney?.trip) {
+        val j = model.activeJourney ?: return@LaunchedEffect
+        val steps = buildSteps(j.trip, j.fromLabel, j.toLabel)
+        Beta.log("step", "i" to model.journeyStep, "of" to steps.size,
+            "kind" to steps.getOrNull(model.journeyStep)?.javaClass?.simpleName)
+    }
     LaunchedEffect(journeyActive, lifecycle) {
         if (!journeyActive) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -1025,6 +1056,18 @@ private fun freshLastKnown(ctx: Context, maxAgeMs: Long): Pair<Double, Double>? 
 } catch (e: SecurityException) { null }
 
 fun requestLocationOnce(ctx: Context, onResult: (Pair<Double, Double>) -> Unit) {
+    // Kav Beta with Google as the main source: ask Google first, Kav's own if Google has nothing.
+    if (DualGps.enabled && DualGps.main == DualGps.Source.GOOGLE) {
+        GoogleGps.once(ctx) { l ->
+            if (l != null) { Beta.fix(l, "google"); onResult(l.latitude to l.longitude) }
+            else requestKavLocationOnce(ctx, onResult)
+        }
+        return
+    }
+    requestKavLocationOnce(ctx, onResult)
+}
+
+private fun requestKavLocationOnce(ctx: Context, onResult: (Pair<Double, Double>) -> Unit) {
     if (!hasLocationPermission(ctx)) return
     // Only a recent last-known position is worth showing while the fresh fix comes in.
     freshLastKnown(ctx, 120_000L)?.let(onResult)
@@ -1058,6 +1101,17 @@ fun requestLocationOnce(ctx: Context, onResult: (Pair<Double, Double>) -> Unit) 
 }
 
 fun trackLocation(ctx: Context, onFix: (Location) -> Unit): () -> Unit {
+    // Kav Beta `dual_gps`: Kav's own and Google's side by side, the chosen one driving the app.
+    if (DualGps.enabled) {
+        val stopKav = trackKavLocation(ctx) { DualGps.got(DualGps.Source.KAV, it, onFix) }
+        val stopGoogle = GoogleGps.track(ctx) { DualGps.got(DualGps.Source.GOOGLE, it, onFix) }
+        return { stopKav(); stopGoogle() }
+    }
+    return trackKavLocation(ctx) { Beta.fix(it, "kav"); onFix(it) }
+}
+
+/** Kav's own location: Android's GPS and network providers. */
+fun trackKavLocation(ctx: Context, onFix: (Location) -> Unit): () -> Unit {
     if (!hasLocationPermission(ctx)) return {}
     val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return {}
     val listener = object : LocationListener {
@@ -1235,6 +1289,10 @@ object Prefs {
         val kept = (listOf(key) + recentLines(ctx)).distinct().take(MAX_RECENT_LINES)
         store(ctx).edit().putString(RECENT_LINES, org.json.JSONArray(kept).toString()).apply()
     }
+
+    /** Beta channel: updates come from beta builds, and in a beta build the experiments and log run. */
+    fun betaChannel(ctx: Context): Boolean = store(ctx).getBoolean("betaChannel", false)
+    fun setBetaChannel(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("betaChannel", on).apply()
 
     fun accent(ctx: Context): Int {
         val a = store(ctx).getInt("accent", android.graphics.Color.rgb(0x9A, 0xBE, 0xFF))

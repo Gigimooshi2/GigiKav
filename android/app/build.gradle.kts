@@ -4,18 +4,29 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Kav Beta (builds from beta/ branches; locally KAV_BETA=true). See beta/README.md.
+val kavBeta = System.getenv("KAV_BETA") == "true"
+
 android {
     namespace = "uk.noammm.kav"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "uk.noammm.kav"
         minSdk = 26
         targetSdk = 35
         // CI builds count up from 1000 so every build installs as an update.
         val ci = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
         versionCode = if (ci != null) 1000 + ci else 19
-        versionName = if (ci != null) "2.0-gigi.$ci" else "2.0"
+        // Builds from beta/ branches are beta builds of Kav itself (same app, same data): they carry the
+        // experiments, remote switches and log, active while Settings → "Beta channel" is on.
+        // Locally: KAV_BETA=true tools/android_build.sh …
+        val beta = kavBeta
+        versionName = if (ci != null) (if (beta) "2.0-beta.$ci" else "2.0-gigi.$ci") else if (beta) "2.0-beta" else "2.0"
+        applicationId = "uk.noammm.kav"
+        resValue("string", "app_name", "Kav")
+        buildConfigField("boolean", "BETA", beta.toString())
+        // Which branch the beta follows for its switches (flags.json).
+        buildConfigField("String", "BETA_BRANCH", "\"" + (System.getenv("GITHUB_REF_NAME") ?: "beta/dev") + "\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // MapLibre's renderer is native code. Every phone Kav can reach is arm64;
         // x86_64 stays so the release APK still installs on the emulator.
@@ -51,7 +62,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
+
+    // Google's location (Play services) is Kav Beta only, for comparing it with Kav's own; the normal
+    // Kav gets an empty stand-in and no Google code at all.
+    sourceSets["main"].java.srcDir(if (kavBeta) "src/beta/java" else "src/prod/java")
 
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
@@ -69,6 +84,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.maplibre.gl:android-sdk:12.3.1")
+    if (kavBeta) implementation("com.google.android.gms:play-services-location:21.3.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

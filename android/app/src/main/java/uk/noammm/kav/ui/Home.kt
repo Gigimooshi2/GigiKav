@@ -416,7 +416,10 @@ internal fun stepInstruction(step: Step, journey: ActiveJourney, lastLeg: Boolea
             if (departure.status == 3) T("${line(ride)} is cancelled", "${line(ride)} מבוטל") to T("Find another route before continuing.", "מצאו מסלול אחר לפני שתמשיכו.")
             else T("Wait for ${line(ride)}", "המתנה ל${line(ride)}") to listOfNotNull(
                 stop(ride.fromStop),
-                depStateLabel(departure) + " · " + whenLabel(departure.timeUtc, now),
+                // Beta: the bus's real state (real GPS vs. only the timetable) instead of the time's state.
+                (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS).takeIf { it }
+                    ?.let { busStatus(r.arrival(ride), now)?.takeIf { s -> s.state != BusState.LIVE }?.short }
+                    ?: depStateLabel(departure)) + " · " + whenLabel(departure.timeUtc, now),
             ).joinToString(" · ")
         }
         is Step.Ride -> {

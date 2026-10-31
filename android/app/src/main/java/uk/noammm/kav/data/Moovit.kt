@@ -44,6 +44,7 @@ object Moovit {
         revision: Boolean = true,
     ): Pair<Int, ByteArray> {
         repeat(2) { attempt ->
+            val t0 = System.currentTimeMillis()
             val c = (URL(base + path).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"; doOutput = true; connectTimeout = 20000; readTimeout = readMs
                 for ((k, v) in if (revision) withRev(headers) else headers) setRequestProperty(k, v)
@@ -55,6 +56,7 @@ object Moovit {
                 val bytes = s.readBytes()
                 if (c.contentEncoding == "gzip") GZIPInputStream(bytes.inputStream()).readBytes() else bytes
             } ?: ByteArray(0)
+            uk.noammm.kav.Beta.api(path, code, System.currentTimeMillis() - t0, raw.size)
             if (attempt == 0 && (adoptRevision(c, code) || code == 412)) return@repeat
             return code to raw
         }
@@ -158,8 +160,23 @@ object Moovit {
         val tripShapeId: Int = -1,
         val patternId: Int = -1,
         val platform: String = "",
+        /** Where the position comes from: 1 = the bus's own GPS, 2 = placed from the timetable. */
+        val locSource: Int = 0,
+        /** How far the bus is along to its next stop, 0–100. */
+        val toNextPct: Int = -1,
+        /** Timetabled seconds from the trip's first stop to this one. */
+        val fromStartSec: Int = -1,
     ) {
         val key get() = ArrivalKey(stopId, tripId)
+        /**
+         * Moovit puts every timetabled trip that hasn't started on the map at its first stop, with a
+         * made-up "SCHEDULED:…" vehicle. That is the timetable, not a bus.
+         */
+        val placeholder get() = tracked && (locSource == 2 || vehicleId.startsWith("SCHEDULED"))
+        /** A real bus reporting its own position. */
+        val realBus get() = hasLocation && !placeholder
+        /** When the trip is timetabled to leave its first stop (utc seconds), if Moovit says. */
+        val tripStartUtc get() = if (fromStartSec >= 0 && staticUtc > 0) staticUtc - fromStartSec else 0L
         fun departure(alert: Int = 0) = Departure(
             tripId, staticUtc, rtUtc, statisticalUtc, status, certainty, traffic,
             frequency, rtDropped, vehicleStatus, alert, platform,
@@ -241,6 +258,9 @@ object Moovit {
         return parseStopArrivals(code, raw)
     }
 
+    /** Kav Beta: Moovit's last raw record per arrival, all fields, for the log. */
+    val rawArrivals = java.util.concurrent.ConcurrentHashMap<ArrivalKey, String>()
+
     @Suppress("UNCHECKED_CAST")
     internal fun parseStopArrivals(code: Int, raw: ByteArray): Pair<Map<ArrivalKey, Arrival>, Int> {
         if (code != 200) throw java.io.IOException("StopsArrivals HTTP $code")
@@ -263,6 +283,10 @@ object Moovit {
                     val v = am[11] as? Map<Int, Any?>
                     val ll = v?.get(1) as? Map<Int, Any?>
                     val prog = v?.get(2) as? Map<Int, Any?>
+                    if (uk.noammm.kav.Beta.on) {
+                        if (rawArrivals.size > 800) rawArrivals.clear()
+                        rawArrivals[ArrivalKey(stopId, tripId)] = am.toString()
+                    }
                     out[ArrivalKey(stopId, tripId)] = Arrival(
                         stopId = stopId, lineId = lineId, tripId = tripId,
                         staticUtc = ((am[3] as? Long) ?: 0L) / 1000,
@@ -285,6 +309,9 @@ object Moovit {
                         tripShapeId = (am[15] as? Int) ?: -1,
                         patternId = (am[1] as? Int) ?: -1,
                         platform = (am[6] as? String).orEmpty(),
+                        locSource = (v?.get(6) as? Int) ?: 0,
+                        toNextPct = (prog?.get(2) as? Int) ?: -1,
+                        fromStartSec = (am[10] as? Int) ?: -1,
                     )
                 }
             }
@@ -299,6 +326,7 @@ object Moovit {
 
     private fun get(base: String, path: String, headers: Map<String, String>): Pair<Int, ByteArray> {
         repeat(2) { attempt ->
+            val t0 = System.currentTimeMillis()
             val url = path.replace(Regex("metro_revision=\\d+"), "metro_revision=$metroRev")
             val c = (URL(base + url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"; connectTimeout = 20000; readTimeout = 25000
@@ -308,6 +336,7 @@ object Moovit {
             val raw = (if (code in 200..299) c.inputStream else c.errorStream)?.use { st ->
                 val b = st.readBytes(); if (c.contentEncoding == "gzip") GZIPInputStream(b.inputStream()).readBytes() else b
             } ?: ByteArray(0)
+            uk.noammm.kav.Beta.api(path, code, System.currentTimeMillis() - t0, raw.size)
             if (attempt == 0 && (adoptRevision(c, code) || code == 412)) return@repeat
             return code to raw
         }

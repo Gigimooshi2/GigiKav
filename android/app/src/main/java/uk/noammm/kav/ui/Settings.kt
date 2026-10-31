@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -40,6 +41,10 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
     Column(Modifier.fillMaxSize().background(K.bg).verticalScroll(rememberScrollState())
         .padding(bottom = LocalBottomBarInset.current)) {
         ScreenHeader(T("Your", "ההגדרות"), T("settings", "שלכם"), back = onClose)
+
+        Group(T("beta", "בטא"))
+        BetaChannelRow(model)
+        if (uk.noammm.kav.Beta.on) BetaSection(ctx)
 
         Group(T("language", "שפה"))
         LanguageRow(ctx)
@@ -355,6 +360,149 @@ private fun PlacesKeyRow(ctx: android.content.Context) {
     }
 }
 
+
+/**
+ * The beta channel: Kav updates itself to beta builds of itself (same app, so places, widgets and
+ * settings stay). Off again: experiments and the log stop at once; the next normal release replaces
+ * the beta build.
+ */
+@Composable
+private fun BetaChannelRow(model: KavModel) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val on = uk.noammm.kav.Beta.channel
+    Column(Modifier.padding(horizontal = K.gap4), verticalArrangement = Arrangement.spacedBy(K.gap2)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(T("Beta channel", "ערוץ בטא"), fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium)
+                Text(
+                    T("Get test builds with new experiments. Same app: your places, widgets and settings stay. " +
+                        "While on, the beta sends its full log, including your location, to a private topic for testing.",
+                        "קבלו גרסאות ניסיון עם ניסויים חדשים. אותה אפליקציה: המקומות, הווידג׳טים וההגדרות נשארים. " +
+                        "כשזה פעיל, הבטא שולחת את היומן המלא, כולל המיקום שלכם, לנושא פרטי לצורך בדיקות."),
+                    fontSize = 12.sp, color = K.dim, lineHeight = 16.sp,
+                )
+            }
+            Spacer(Modifier.width(K.gap3))
+            androidx.compose.material3.Switch(
+                checked = on,
+                onCheckedChange = { want ->
+                    uk.noammm.kav.Beta.setChannel(ctx, want)
+                    // Fetch the build for the channel now rather than at the next background check.
+                    model.updateDismissed = false
+                    scope.launch { model.checkForUpdate(ctx) }
+                    uk.noammm.kav.AutoUpdate.soon(ctx)
+                },
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = K.accent),
+            )
+        }
+        val note = when {
+            on && !uk.noammm.kav.BuildConfig.BETA ->
+                T("Getting the beta build: it installs as an update, like any other.", "מורידים את גרסת הבטא: היא מותקנת כעדכון, כמו כל עדכון.")
+            !on && uk.noammm.kav.BuildConfig.BETA ->
+                T("Experiments are off. The next normal release replaces this beta build.", "הניסויים כבויים. הגרסה הרגילה הבאה תחליף את גרסת הבטא.")
+            on -> T("Beta build ", "גרסת בטא ") + uk.noammm.kav.data.Updates.installedVersion(ctx)
+            else -> null
+        }
+        if (note != null) Text(note, fontSize = 12.sp, color = if (on) K.accent else K.dim)
+    }
+}
+
+/**
+ * Kav Beta: the live log's secret topic (to copy to whoever is reading it), pausing it, and the
+ * remote switches currently in force.
+ */
+@Composable
+private fun BetaSection(ctx: android.content.Context) {
+    val b = uk.noammm.kav.Beta
+    val topic = remember { b.topic(ctx) }
+    val hm = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+    Column(Modifier.padding(horizontal = K.gap4), verticalArrangement = Arrangement.spacedBy(K.gap2)) {
+        Text(
+            T("Live log", "יומן חי"), fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium,
+        )
+        Text(
+            T("While sharing is on, this beta sends everything it does (its full log, crashes, Moovit requests, screens, " +
+                "searches, trips, your location) to a private ntfy.sh topic. Copy its name to whoever reads it.",
+                "כשהשיתוף פעיל, הבטא שולחת את כל מה שהיא עושה (היומן המלא, קריסות, בקשות ל-Moovit, מסכים, חיפושים, " +
+                "נסיעות, המיקום שלכם) לנושא פרטי ב-ntfy.sh. העתיקו את שמו למי שקורא אותו."),
+            fontSize = 12.sp, color = K.dim, lineHeight = 16.sp,
+        )
+        Text(
+            topic, fontSize = 14.sp, color = K.text, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            modifier = Modifier.fillMaxWidth().panel(K.rControl)
+                .clickable {
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Kav Beta log", topic))
+                    android.widget.Toast.makeText(ctx, T("Copied", "הועתק"), android.widget.Toast.LENGTH_SHORT).show()
+                }
+                .padding(K.gap3),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (b.sharing) T("Sharing", "משתף") else T("Paused", "מושהה"),
+                fontSize = 14.sp, color = K.text, modifier = Modifier.weight(1f),
+            )
+            androidx.compose.material3.Switch(
+                checked = b.sharing, onCheckedChange = { b.setSharing(ctx, it) },
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = K.accent),
+            )
+        }
+        Text(
+            (if (b.lastSent > 0) T("Last sent ", "נשלח לאחרונה ") + hm.format(java.util.Date(b.lastSent)) else T("Nothing sent yet", "עוד לא נשלח")) +
+                " · " + uk.noammm.kav.data.Updates.installedVersion(ctx),
+            fontSize = 12.sp, color = K.dim,
+        )
+        if (uk.noammm.kav.DualGps.enabled) {
+            Spacer(Modifier.height(K.gap2))
+            Text(T("Main location", "מיקום ראשי"), fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium)
+            Text(
+                T("Kav's own (Android's GPS and network) or Google's (what Google Maps uses). Both show on the trip " +
+                    "map and both are logged; this one drives the app.",
+                    "של Kav (GPS ורשת של אנדרואיד) או של Google (מה שגוגל מפות משתמש בו). שניהם מוצגים במפת הנסיעה " +
+                    "ושניהם נרשמים; זה שנבחר מפעיל את האפליקציה."),
+                fontSize = 12.sp, color = K.dim, lineHeight = 16.sp,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+                for (src in uk.noammm.kav.DualGps.Source.entries) {
+                    Chip(src.label, uk.noammm.kav.DualGps.main == src) { uk.noammm.kav.DualGps.setMain(ctx, src) }
+                }
+            }
+            if (!uk.noammm.kav.GoogleGps.available(ctx)) Text(
+                T("Google location isn't available on this phone (no Play services).", "המיקום של Google לא זמין בטלפון הזה."),
+                fontSize = 12.sp, color = K.problem,
+            )
+        }
+        Spacer(Modifier.height(K.gap2))
+        Text(T("Switches", "מתגים"), fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium)
+        Text(
+            if (b.flags.isEmpty()) T("None set", "אין") else b.flags.entries.joinToString("\n") { "${it.key}: ${it.value}" },
+            fontSize = 13.sp, color = K.muted, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+        )
+        Text(
+            if (b.flagsAt > 0) T("Checked ", "נבדק ") + hm.format(java.util.Date(b.flagsAt)) else T("Not checked yet", "עוד לא נבדק"),
+            fontSize = 12.sp, color = K.dim,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+            Chip(T("Check switches", "בדיקת מתגים"), false) { b.refreshFlags() }
+            Chip(T("Send log now", "שליחת היומן"), false) { b.sendNow() }
+        }
+        Text(
+            T("The full log stays on this phone for 7 days. Uploaded files are kept for 3 hours, so upload " +
+                "after a trip you want looked at and say so.",
+                "היומן המלא נשמר בטלפון 7 ימים. קבצים שהועלו נשמרים 3 שעות, אז העלו אחרי נסיעה שתרצו שייבדק ותגידו."),
+            fontSize = 12.sp, color = K.dim, lineHeight = 16.sp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+            for (h in listOf(3, 24)) Chip(T("Upload last $h h", "העלאת $h שע׳ אחרונות"), false) {
+                b.uploadLast(h) { ok ->
+                    android.widget.Toast.makeText(ctx, if (ok) T("Uploaded", "הועלה") else T("Upload failed", "ההעלאה נכשלה"),
+                        android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun PackChoices(inset: Dp) {

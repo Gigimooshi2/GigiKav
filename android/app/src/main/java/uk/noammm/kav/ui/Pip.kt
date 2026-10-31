@@ -49,7 +49,11 @@ fun PipOverlay(model: KavModel) {
             val (ride, wait) = boardingChoice(w.ride, w.wait, journey.chosen[w.legIndex] ?: 0)
             journey.resolved.departures(ride, wait).firstOrNull { it.tripId == ride.tripId }
         }
-        val waitTint = waitDep?.takeIf { it.state != Moovit.TimeState.STATIC && it.state != Moovit.TimeState.STATISTICAL }
+        val waitStatus = (steps[index] as? Step.Wait)?.takeIf { uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS) }?.let { w ->
+            val (ride, _) = boardingChoice(w.ride, w.wait, journey.chosen[w.legIndex] ?: 0)
+            busStatus(journey.resolved.arrival(ride), now)?.takeIf { it.state != BusState.LIVE }
+        }
+        val waitTint = waitStatus?.tint ?: waitDep?.takeIf { it.state != Moovit.TimeState.STATIC && it.state != Moovit.TimeState.STATISTICAL }
             ?.let { depColour(it) }
         val waitLive = waitDep?.live == true
         // On a bus: the stops along it (names and places), for counting how many are left.
