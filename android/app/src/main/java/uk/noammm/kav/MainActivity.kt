@@ -548,13 +548,16 @@ private fun Shell(model: KavModel) {
         val j = model.activeJourney
         if (j == null) Beta.log("trip", "running" to false)
         else Beta.log("trip", "running" to true, "from" to j.fromLabel, "to" to j.toLabel,
-            "lines" to j.trip.rides.joinToString(" › ") { it.shortName }, "dep" to j.trip.dep, "arr" to j.trip.arr)
+            "lines" to j.trip.rides.joinToString(" › ") { it.shortName.ifBlank { j.resolved.line(it.lineId)?.number.orEmpty() } }, "dep" to j.trip.dep, "arr" to j.trip.arr)
     }
     LaunchedEffect(model.journeyStep, model.activeJourney?.trip) {
         val j = model.activeJourney ?: return@LaunchedEffect
         val steps = buildSteps(j.trip, j.fromLabel, j.toLabel)
         Beta.log("step", "i" to model.journeyStep, "of" to steps.size,
-            "kind" to steps.getOrNull(model.journeyStep)?.javaClass?.simpleName)
+            "kind" to when (steps.getOrNull(model.journeyStep)) {
+                is Step.Start -> "start"; is Step.Walk -> "walk"; is Step.Wait -> "wait"; is Step.Ride -> "ride"
+                is Step.Taxi -> "taxi"; is Step.Cycle -> "cycle"; is Step.Arrive -> "arrive"; null -> null
+            })
     }
     LaunchedEffect(journeyActive, lifecycle) {
         if (!journeyActive) return@LaunchedEffect
