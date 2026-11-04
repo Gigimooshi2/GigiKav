@@ -57,11 +57,21 @@ fun busStatus(a: Moovit.Arrival?, now: Long): BusStatus? {
 }
 
 /**
- * The bus you'd actually catch for [ride]: the first one still to come on the stop's live board
- * (the same list the times on the card come from), else the trip Kav planned.
+ * The departure to show while you wait for [ride]. With `bus_status` on: the next bus you'd actually
+ * catch, the first still to come on the stop's live board (the times on the card), which may be an
+ * earlier bus than the one planned. Off: the planned trip, as Kav always did.
  */
-fun nextBus(r: Moovit.Resolved, ride: Moovit.Leg, now: Long): Moovit.Arrival? =
-    r.liveFor(ride).firstOrNull { it.departure().timeUtc >= now - 60 } ?: r.arrival(ride)
+fun waitDeparture(r: Moovit.Resolved, ride: Moovit.Leg, wait: Moovit.Leg?, now: Long): Moovit.Departure {
+    val deps = r.departures(ride, wait)
+    if (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)) {
+        deps.filter { it.timeUtc >= now - 60 }.minByOrNull { it.timeUtc }?.let { return it }
+    }
+    return deps.firstOrNull { it.tripId == ride.tripId } ?: Moovit.Departure(ride.tripId, ride.dep)
+}
+
+/** Moovit's live record for the bus behind [dep] (for its status), else the planned trip's. */
+fun waitArrival(r: Moovit.Resolved, ride: Moovit.Leg, dep: Moovit.Departure): Moovit.Arrival? =
+    r.live[Moovit.ArrivalKey(ride.fromStop, dep.tripId)] ?: r.arrival(ride)
 
 /** Kav Beta log: Moovit's live record for every bus of the trip, and the state Kav made of it. */
 internal fun logLive(journey: uk.noammm.kav.ActiveJourney, now: Long) {

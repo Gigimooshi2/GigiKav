@@ -20,7 +20,7 @@ object DualGps {
 
     val enabled: Boolean get() = Beta.flag(FLAG)
 
-    var main by mutableStateOf(Source.KAV)
+    var main by mutableStateOf(Source.GOOGLE)
         private set
     var kav by mutableStateOf<Location?>(null)
         private set
@@ -33,7 +33,9 @@ object DualGps {
     private fun store(ctx: Context) = ctx.getSharedPreferences("kav_beta", Context.MODE_PRIVATE)
 
     fun load(ctx: Context) {
-        main = runCatching { Source.valueOf(store(ctx).getString("gpsMain", null) ?: "KAV") }.getOrDefault(Source.KAV)
+        // Google's is the default main source: on the first logged trips its fixes were about twice as
+        // precise (median ±8 m vs ±17 m for Kav's own; 90th percentile ±36 m vs ±76 m).
+        main = runCatching { Source.valueOf(store(ctx).getString("gpsMain", null) ?: "GOOGLE") }.getOrDefault(Source.GOOGLE)
     }
 
     fun setMain(ctx: Context, s: Source) {

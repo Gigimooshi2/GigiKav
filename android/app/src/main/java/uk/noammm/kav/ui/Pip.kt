@@ -47,11 +47,11 @@ fun PipOverlay(model: KavModel) {
         // Waiting: the time takes the same colour as in the app (live, weak, off route…); live ones glow.
         val waitDep = (steps[index] as? Step.Wait)?.let { w ->
             val (ride, wait) = boardingChoice(w.ride, w.wait, journey.chosen[w.legIndex] ?: 0)
-            journey.resolved.departures(ride, wait).firstOrNull { it.tripId == ride.tripId }
+            waitDeparture(journey.resolved, ride, wait, now)
         }
         val waitStatus = (steps[index] as? Step.Wait)?.takeIf { uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS) }?.let { w ->
             val (ride, _) = boardingChoice(w.ride, w.wait, journey.chosen[w.legIndex] ?: 0)
-            busStatus(journey.resolved.arrival(ride), now)?.takeIf { it.state != BusState.LIVE }
+            waitDep?.let { busStatus(waitArrival(journey.resolved, ride, it), now) }?.takeIf { it.state != BusState.LIVE }
         }
         val waitTint = waitStatus?.tint ?: waitDep?.takeIf { it.state != Moovit.TimeState.STATIC && it.state != Moovit.TimeState.STATISTICAL }
             ?.let { depColour(it) }
