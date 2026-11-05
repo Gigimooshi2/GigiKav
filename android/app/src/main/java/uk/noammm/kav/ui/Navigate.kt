@@ -563,7 +563,8 @@ internal fun StepCard(
                             ),
                     ) {
                         LineRow(ride, r)
-                        if (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)) busStatus(r.arrival(ride), now)?.let { st ->
+                        // The bus you'd catch: the first of the times below, not necessarily the planned trip.
+                        if (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)) busStatus(waitArrival(r, ride, waitDeparture(r, ride, wait, now)), now)?.let { st ->
                             Spacer(Modifier.height(K.gap2))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (st.state == BusState.LIVE || st.state == BusState.LIVE_AT_START) {

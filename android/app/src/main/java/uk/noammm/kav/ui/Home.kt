@@ -411,14 +411,13 @@ internal fun stepInstruction(step: Step, journey: ActiveJourney, lastLeg: Boolea
         }
         is Step.Wait -> {
             val (ride, wait) = boardingChoice(step.ride, step.wait, journey.chosen[step.legIndex] ?: 0)
-            val departure = r.departures(ride, wait).firstOrNull { it.tripId == ride.tripId }
-                ?: Moovit.Departure(ride.tripId, ride.dep)
+            val departure = waitDeparture(r, ride, wait, now)
             if (departure.status == 3) T("${line(ride)} is cancelled", "${line(ride)} מבוטל") to T("Find another route before continuing.", "מצאו מסלול אחר לפני שתמשיכו.")
             else T("Wait for ${line(ride)}", "המתנה ל${line(ride)}") to listOfNotNull(
                 stop(ride.fromStop),
                 // Beta: the bus's real state (real GPS vs. only the timetable) instead of the time's state.
                 (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS).takeIf { it }
-                    ?.let { busStatus(r.arrival(ride), now)?.takeIf { s -> s.state != BusState.LIVE }?.short }
+                    ?.let { busStatus(waitArrival(r, ride, departure), now)?.takeIf { s -> s.state != BusState.LIVE }?.short }
                     ?: depStateLabel(departure)) + " · " + whenLabel(departure.timeUtc, now),
             ).joinToString(" · ")
         }

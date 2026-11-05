@@ -56,23 +56,46 @@ fun busStatus(a: Moovit.Arrival?, now: Long): BusStatus? {
     )
 }
 
+/**
+ * The departure to show while you wait for [ride]. With `bus_status` on: the next bus you'd actually
+ * catch, the first still to come on the stop's live board (the times on the card), which may be an
+ * earlier bus than the one planned. Off: the planned trip, as Kav always did.
+ */
+fun waitDeparture(r: Moovit.Resolved, ride: Moovit.Leg, wait: Moovit.Leg?, now: Long): Moovit.Departure {
+    val deps = r.departures(ride, wait)
+    if (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)) {
+        deps.filter { it.timeUtc >= now - 60 }.minByOrNull { it.timeUtc }?.let { return it }
+    }
+    return deps.firstOrNull { it.tripId == ride.tripId } ?: Moovit.Departure(ride.tripId, ride.dep)
+}
+
+/** Moovit's live record for the bus behind [dep] (for its status), else the planned trip's. */
+fun waitArrival(r: Moovit.Resolved, ride: Moovit.Leg, dep: Moovit.Departure): Moovit.Arrival? =
+    r.live[Moovit.ArrivalKey(ride.fromStop, dep.tripId)] ?: r.arrival(ride)
+
 /** Kav Beta log: Moovit's live record for every bus of the trip, and the state Kav made of it. */
 internal fun logLive(journey: uk.noammm.kav.ActiveJourney, now: Long) {
     if (!uk.noammm.kav.Beta.on) return
     val r = journey.resolved
     val rides = journey.trip.legs.filter { it.kind == Moovit.LegKind.RIDE }.flatMap { it.options }
-    for (leg in rides) for (stop in listOf(leg.fromStop, leg.toStop)) {
-        val a = r.live[Moovit.ArrivalKey(stop, leg.tripId)] ?: continue
+    fun put(leg: Moovit.Leg, a: Moovit.Arrival, at: String) {
         val st = busStatus(a, now)
         uk.noammm.kav.Beta.log(
-            "live", "line" to (leg.shortName.ifBlank { r.line(leg.lineId)?.number.orEmpty() }), "trip" to leg.tripId,
-            "at" to if (stop == leg.fromStop) "board" else "alight", "stop" to stop,
+            "live", "line" to (leg.shortName.ifBlank { r.line(leg.lineId)?.number.orEmpty() }), "trip" to a.tripId,
+            "planned" to (a.tripId == leg.tripId), "at" to at, "stop" to a.stopId,
             "veh" to a.vehicleId, "src" to a.locSource, "vs" to a.vehicleStatus, "lat" to a.lat, "lon" to a.lon,
             "sampleAge" to if (a.sampleUtc > 0) now - a.sampleUtc else null,
             "stopIdx" to a.stopIndex, "next" to a.nextStopIndex, "pct" to a.toNextPct,
             "sched" to a.staticUtc, "rt" to a.rtUtc, "start" to a.tripStartUtc, "cert" to a.certainty, "status" to a.status,
             "state" to st?.state?.name, "shown" to (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS) && st != null),
-            "raw" to Moovit.rawArrivals[Moovit.ArrivalKey(stop, leg.tripId)],
+            "raw" to Moovit.rawArrivals[a.key],
         )
+    }
+    for (leg in rides) {
+        // Every bus of the line heading your way at the boarding stop (the times on the card), and
+        // the planned one where you get off.
+        val board = r.liveFor(leg).ifEmpty { listOfNotNull(r.arrival(leg)) }
+        for (a in board) put(leg, a, "board")
+        r.live[Moovit.ArrivalKey(leg.toStop, leg.tripId)]?.let { put(leg, it, "alight") }
     }
 }

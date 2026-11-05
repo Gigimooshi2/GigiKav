@@ -36,6 +36,7 @@
            GET_ACCOUNTS / CONTACTS   - there are no accounts -->
 
     <application
+        android:name=".KavApp"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"

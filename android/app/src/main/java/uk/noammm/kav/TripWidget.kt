@@ -149,8 +149,15 @@ class TripWidget : AppWidgetProvider() {
             v.setTextViewText(R.id.trip_sub, sub)
 
             v.removeAllViews(R.id.trip_rows)
-            val rows = saved?.optJSONArray("rows")
+            // Options kept from an earlier refresh (offline): drop ones whose bus has already gone.
+            val nowS = System.currentTimeMillis() / 1000
+            val all = saved?.optJSONArray("rows")
+            val rows = all?.let { a ->
+                JSONArray().also { out -> for (i in 0 until a.length()) a.getJSONObject(i).takeIf { it.optLong("dep", nowS) >= nowS - 60 }?.let(out::put) }
+            }
             val note = when {
+                (rows == null || rows.length() == 0) && saved?.optBoolean("offline") == true && (all?.length() ?: 0) > 0 ->
+                    T("Offline, and the last options have left. Retrying…", "אין חיבור, והאפשרויות האחרונות כבר יצאו. מנסה שוב…")
                 dest == null || dest.place == null -> T("Tap ✏️ to choose a destination", "הקישו ✏️ לבחירת יעד")
                 saved == null -> T("Loading…", "טוען…")
                 saved.optString("error").isNotBlank() -> saved.optString("error")
@@ -225,6 +232,7 @@ class TripWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
             // No internet (or Moovit didn't answer): keep the last good times on screen, marked as old,
             // and let WorkManager retry with backoff once the network is back.
             android.util.Log.w("KavTripWidget", "offline", e)
+            Beta.widget(ctx, "trip", id, ok = false, error = e)
             val keep = prev?.takeIf { (it.optJSONArray("rows")?.length() ?: 0) > 0 }
             val o = keep?.put("offline", true) ?: JSONObject().put("at", 0L)
                 .put("error", T("No internet right now. Retrying…", "אין אינטרנט כרגע. מנסה שוב…"))
@@ -233,8 +241,10 @@ class TripWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
             return runAttemptCount >= 4
         } catch (e: Exception) {
             android.util.Log.w("KavTripWidget", "refresh failed", e)
+            Beta.widget(ctx, "trip", id, ok = false, error = e)
             JSONObject().put("at", System.currentTimeMillis()).put("error", e.message ?: T("Couldn't reach Moovit", "לא ניתן להגיע ל-Moovit"))
         }
+        if (!out.has("error")) Beta.widget(ctx, "trip", id, ok = true)
         TripWidget.store(ctx).edit().putString("rows_$id", out.toString()).apply()
         TripWidget.render(ctx, id)
         return true
@@ -284,6 +294,7 @@ class TripWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
                 .put("lines", lines)
                 .put("times", hm.format(Date(board * 1000)) + " → " + hm.format(Date(t.arr * 1000)))
                 .put("live", live?.live == true)
+                .put("dep", board)
                 .put("detail", listOfNotNull(
                     r.stopName(first.fromStop),
                     T("walk $walk min", "הליכה $walk דק׳").takeIf { walk > 0 },

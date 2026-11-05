@@ -108,17 +108,23 @@ class StationWidget : AppWidgetProvider() {
                 T("paused", "מושהה").takeIf { c?.paused == true },
             ).joinToString(" · "))
             v.removeAllViews(R.id.trip_rows)
-            val rows = saved?.optJSONArray("rows")
+            // Times kept from an earlier refresh (offline): drop buses that have already gone.
+            val now = System.currentTimeMillis() / 1000
+            val all = saved?.optJSONArray("rows")
+            val rows = all?.let { a ->
+                org.json.JSONArray().also { out -> for (i in 0 until a.length()) a.getJSONObject(i).takeIf { it.getLong("t") >= now - 60 }?.let(out::put) }
+            }
             val note = when {
                 c == null -> T("Tap ✏️ to pick a station and line", "הקישו ✏️ לבחירת תחנה וקו")
                 saved == null -> T("Loading…", "טוען…")
                 saved.optString("error").isNotBlank() -> saved.optString("error")
+                (rows == null || rows.length() == 0) && saved.optBoolean("offline") && (all?.length() ?: 0) > 0 ->
+                    T("Offline, and the last times have passed. Retrying…", "אין חיבור, והזמנים האחרונים עברו. מנסה שוב…")
                 rows == null || rows.length() == 0 -> T("No upcoming ${c.line} here right now", "אין כרגע ${c.line} קרוב בתחנה")
                 else -> null
             }
             v.setViewVisibility(R.id.trip_note, if (note != null) View.VISIBLE else View.GONE)
             note?.let { v.setTextViewText(R.id.trip_note, it) }
-            val now = System.currentTimeMillis() / 1000
             if (rows != null && note == null) for (i in 0 until rows.length()) {
                 val r = rows.getJSONObject(i)
                 val at = r.getLong("t")
@@ -192,6 +198,7 @@ class StationWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWor
             // No internet (or Moovit didn't answer): keep the last good times on screen, marked as old,
             // and let WorkManager retry with backoff once the network is back.
             android.util.Log.w("KavStationWidget", "offline", e)
+            Beta.widget(ctx, "station", id, ok = false, error = e)
             val keep = prev?.takeIf { (it.optJSONArray("rows")?.length() ?: 0) > 0 }
             val o = keep?.put("offline", true) ?: JSONObject().put("at", 0L)
                 .put("error", T("No internet right now. Retrying…", "אין אינטרנט כרגע. מנסה שוב…"))
@@ -200,8 +207,10 @@ class StationWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWor
             return runAttemptCount >= 4
         } catch (e: Exception) {
             android.util.Log.w("KavStationWidget", "refresh failed", e)
+            Beta.widget(ctx, "station", id, ok = false, error = e)
             JSONObject().put("at", System.currentTimeMillis()).put("error", e.message ?: T("Couldn't reach Moovit", "לא ניתן להגיע ל-Moovit"))
         }
+        if (!out.has("error")) Beta.widget(ctx, "station", id, ok = true)
         StationWidget.store(ctx).edit().putString("rows_$id", out.toString()).apply()
         StationWidget.render(ctx, id)
         return true
