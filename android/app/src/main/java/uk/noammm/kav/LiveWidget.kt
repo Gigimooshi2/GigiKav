@@ -346,6 +346,7 @@ class LiveWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
             } catch (e: java.io.IOException) {
                 // No internet: keep the last times (shown as clock times, not a countdown) and retry later.
                 android.util.Log.w("KavLiveWidget", "offline", e)
+            Beta.widget(ctx, "live", id, ok = false, error = e)
                 val o = prev?.takeIf { it.has("places") }?.put("offline", true)
                     ?: JSONObject().put("at", 0L).put("error", T("No internet right now", "אין אינטרנט כרגע"))
                 store.edit().putString("data_$id", o.toString()).apply()
@@ -353,9 +354,11 @@ class LiveWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
                 return runAttemptCount >= 4
             } catch (e: Exception) {
                 android.util.Log.w("KavLiveWidget", "refresh failed", e)
+            Beta.widget(ctx, "live", id, ok = false, error = e)
                 JSONObject().put("at", System.currentTimeMillis())
                     .put("error", e.message ?: T("Couldn't reach Moovit", "לא ניתן להגיע ל-Moovit"))
             }
+            if (!out.has("error")) Beta.widget(ctx, "live", id, ok = true)
             store.edit().putString("data_$id", out.toString()).apply()
             LiveWidgets.render(ctx, id)
             return true

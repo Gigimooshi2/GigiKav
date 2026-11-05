@@ -121,7 +121,33 @@ object Beta {
             }
         }
         log("app", "version" to uk.noammm.kav.data.Updates.installedVersion(c), "sdk" to android.os.Build.VERSION.SDK_INT,
-            "device" to android.os.Build.MODEL, "flags" to JSONObject(flags))
+            "device" to android.os.Build.MODEL, "flags" to JSONObject(flags), *deviceState(c))
+    }
+
+    /**
+     * What Android lets Kav do in the background right now: network up and working, background data
+     * blocked by Data Saver, battery optimisation, and the standby bucket that throttles jobs.
+     */
+    fun deviceState(ctx: Context): Array<Pair<String, Any?>> = runCatching {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val usage = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as? android.app.usage.UsageStatsManager
+        arrayOf<Pair<String, Any?>>(
+            "net" to (caps != null), "validated" to caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+            "dataSaver" to cm.restrictBackgroundStatus,
+            "batteryExempt" to pm.isIgnoringBatteryOptimizations(ctx.packageName),
+            "idle" to pm.isDeviceIdleMode,
+            "bucket" to if (android.os.Build.VERSION.SDK_INT >= 28) usage?.appStandbyBucket else null,
+        )
+    }.getOrDefault(emptyArray())
+
+    /** A widget refresh and how it went, with the phone's background state at that moment. */
+    fun widget(ctx: Context, kind: String, id: Int, ok: Boolean, error: Throwable? = null) {
+        if (!on) return
+        log("widget", "kind" to kind, "id" to id, "ok" to ok,
+            "error" to error?.let { it.javaClass.simpleName + ": " + it.message.orEmpty().take(300) },
+            *deviceState(ctx))
     }
 
     /** Re-read the switches now (Settings → "Check switches"). */
@@ -181,10 +207,22 @@ object Beta {
         logDir = dir
         val cutoff = System.currentTimeMillis() - KEEP_DAYS * 86_400_000L
         dir.listFiles()?.forEach { if (it.lastModified() < cutoff) it.delete() }
-        // A crash from last time, written as the app went down: queue it for the stream.
+        // Lines written but not yet streamed (a background run that ended, no network): queue them again.
+        // That includes a crash written as the app went down.
         val p = store(ctx)
-        p.getString("crash", null)?.let { synchronized(buffer) { buffer.addLast(it) } }
+        val sentUpTo = p.getLong("sentUpTo", System.currentTimeMillis() - 86_400_000L)
         p.edit().remove("crash").apply()
+        runCatching {
+            dir.listFiles()?.filter { it.lastModified() > sentUpTo }?.sortedBy { it.name }?.forEach { f ->
+                f.forEachLine { l ->
+                    val t = runCatching { JSONObject(l).optLong("t") }.getOrDefault(0L)
+                    if (t > sentUpTo) synchronized(buffer) {
+                        buffer.addLast(l)
+                        while (buffer.size > MAX_BUFFERED) buffer.removeFirst()
+                    }
+                }
+            }
+        }
     }
 
     private fun write(line: String) {
@@ -283,6 +321,8 @@ object Beta {
         if (lines.isEmpty()) return
         val ok = send(ctx, lines, "Kav Beta " + uk.noammm.kav.data.Updates.installedVersion(ctx))
         if (!ok) synchronized(buffer) { lines.asReversed().forEach { buffer.addFirst(it) } }
+        else lines.maxOfOrNull { l -> runCatching { JSONObject(l).optLong("t") }.getOrDefault(0L) }
+            ?.let { store(ctx).edit().putLong("sentUpTo", it).apply() }
     }
 
     /** Send lines as one or more messages: inline when small, else gzip attachments of ≤1.9 MB. */
