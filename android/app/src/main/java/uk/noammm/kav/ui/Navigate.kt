@@ -147,6 +147,16 @@ internal fun boardingChoice(
     return options.getOrNull(pick) ?: options.first()
 }
 
+/**
+ * The ways to board, soonest departure first (with each option's place in Moovit's list kept, since
+ * that's what a choice is stored as).
+ */
+internal fun soonestFirst(
+    options: List<Pair<Moovit.Leg, Moovit.Leg?>>, r: Moovit.Resolved, now: Long,
+): List<IndexedValue<Pair<Moovit.Leg, Moovit.Leg?>>> = options.withIndex().sortedBy { (_, o) ->
+    r.departures(o.first, o.second).filter { it.timeUtc >= now - 60 }.minOfOrNull { it.timeUtc } ?: Long.MAX_VALUE
+}
+
 internal fun chosenLegs(trip: Moovit.Itinerary, chosen: Map<Int, Int>): List<Moovit.Leg> =
     trip.legs.mapIndexed { i, l ->
         if (l.kind != Moovit.LegKind.RIDE) l else boardingChoice(
@@ -540,8 +550,9 @@ internal fun StepCard(
             val options = Moovit.boardingOptions(step.ride, step.wait)
             val pick = (chosen[step.legIndex] ?: 0).coerceIn(0, options.lastIndex)
             Card(if (options.size > 1) T("Select a line", "בחרו קו") else T("Wait for", "המתנה ל-"), active) {
-                options.forEachIndexed { index, (ride, wait) ->
-                    if (index > 0) Spacer(Modifier.height(K.gap2))
+                soonestFirst(options, r, now).forEachIndexed { at, (index, option) ->
+                    val (ride, wait) = option
+                    if (at > 0) Spacer(Modifier.height(K.gap2))
                     val picked = index == pick
                     Column(
                         Modifier.fillMaxWidth()
