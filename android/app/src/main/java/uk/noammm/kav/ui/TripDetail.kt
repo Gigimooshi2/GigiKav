@@ -607,8 +607,9 @@ private fun BoardCard(
     val options = Moovit.boardingOptions(ride, wait)
     Column(Modifier.fillMaxWidth()) {
         if (options.size > 1) Text(T("Take one of these lines", "בחרו אחד מהקווים האלה"), fontSize = 14.sp, color = K.dim)
-        options.forEachIndexed { index, (option, boarding) ->
-            if (index > 0) Box(Modifier.fillMaxWidth().padding(vertical = K.gap2).height(1.dp).background(K.border))
+        soonestFirst(options, r, System.currentTimeMillis() / 1000).forEachIndexed { at, (_, o) ->
+            val (option, boarding) = o
+            if (at > 0) Box(Modifier.fillMaxWidth().padding(vertical = K.gap2).height(1.dp).background(K.border))
             BoardOption(option, boarding, r, onTrack, showPlatform = options.size > 1)
         }
     }
