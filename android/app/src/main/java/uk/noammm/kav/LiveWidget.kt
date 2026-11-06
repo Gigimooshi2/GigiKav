@@ -376,7 +376,8 @@ class LiveWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
             if (Online.session == null) Online.init(ctx)
             val s = Online.open(from)
             val types = routeTypesFor(Prefs.filters(ctx))
-            val found = coroutineScope {
+            // Also called from the open app (main thread), so the network work goes to IO.
+            val found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 places.map { f -> async { f.id to runCatching { nextBuses(s, from, f.place!!, types, LiveWidgets.count(ctx, id)) } } }.awaitAll()
             }
             // Only offline if every place failed for lack of a connection; one bad answer shouldn't blank the rest.

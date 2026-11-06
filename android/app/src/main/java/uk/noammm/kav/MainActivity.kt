@@ -134,6 +134,7 @@ class MainActivity : ComponentActivity() {
     private var widgetJob: kotlinx.coroutines.Job? = null
     override fun onStart() {
         super.onStart()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Pip.active = isInPictureInPictureMode
         AutoUpdate.visible = true
         Beta.log("app_open")
         widgetJob?.cancel()
@@ -154,6 +155,12 @@ class MainActivity : ComponentActivity() {
         if (!isChangingConfigurations) { Beta.sendNow(); AutoUpdate.soon(this); TripWidget.refreshAll(this); StationWidget.refreshAll(this); LiveWidgets.refreshAll(this) }
     }
 
+    override fun onDestroy() {
+        // The popup window going away (closed, or finished after a trip) must not leave the app in popup mode.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !isChangingConfigurations) Pip.active = false
+        super.onDestroy()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -167,6 +174,9 @@ class MainActivity : ComponentActivity() {
         MapFile.init(this)
         StopPhotos.init(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Pip.active is app-wide: a fresh window always starts from what this one really is, so a
+            // popup closed earlier can't leave the full app drawing itself as "Trip ended".
+            Pip.active = isInPictureInPictureMode
             addOnPictureInPictureModeChangedListener { Pip.active = it.isInPictureInPictureMode }
         }
         T.lang = Prefs.lang(this)
@@ -384,7 +394,7 @@ private fun Root() {
         if (!Pip.active || model.activeJourney != null) return@LaunchedEffect
         pipActivity?.moveTaskToBack(true)
         kotlinx.coroutines.delay(800)
-        if (Pip.active) pipActivity?.finish()
+        if (Pip.active) { Pip.active = false; pipActivity?.finish() }
     }
 
     var pickLook by remember { mutableStateOf(Prefs.pickLook(ctx)) }
