@@ -250,7 +250,10 @@ class TripWidgetWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
         return true
     }
 
-    private suspend fun fetch(ctx: Context, id: Int): JSONArray {
+    // Also called from the open app (main thread), so the network work goes to IO.
+    private suspend fun fetch(ctx: Context, id: Int): JSONArray = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fetchNow(ctx, id) }
+
+    private suspend fun fetchNow(ctx: Context, id: Int): JSONArray {
         val c = TripWidget.cfg(ctx, id)
         val favs = Prefs.favourites(ctx)
         val to = favs.firstOrNull { it.id == c.destId }?.place ?: return JSONArray()
