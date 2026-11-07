@@ -64,10 +64,6 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
 
-    // Google's location (Play services) is Kav Beta only, for comparing it with Kav's own; the normal
-    // Kav gets an empty stand-in and no Google code at all.
-    sourceSets["main"].java.srcDir(if (kavBeta) "src/beta/java" else "src/prod/java")
-
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
 
@@ -84,7 +80,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.maplibre.gl:android-sdk:12.3.1")
-    if (kavBeta) implementation("com.google.android.gms:play-services-location:21.3.0")
+    // Google's fused location, beside Kav's own (DualGps).
+    implementation("com.google.android.gms:play-services-location:21.3.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

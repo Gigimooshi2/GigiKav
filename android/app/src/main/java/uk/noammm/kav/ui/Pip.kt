@@ -49,7 +49,7 @@ fun PipOverlay(model: KavModel) {
             val (ride, wait) = boardingChoice(w.ride, w.wait, journey.chosen[w.legIndex] ?: 0)
             waitDeparture(journey.resolved, ride, wait, now)
         }
-        val waitStatus = (steps[index] as? Step.Wait)?.takeIf { uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS) }?.let { w ->
+        val waitStatus = (steps[index] as? Step.Wait)?.takeIf { uk.noammm.kav.Beta.shipped(FLAG_BUS_STATUS) }?.let { w ->
             val (ride, _) = boardingChoice(w.ride, w.wait, journey.chosen[w.legIndex] ?: 0)
             waitDep?.let { busStatus(waitArrival(journey.resolved, ride, it), now) }?.takeIf { it.state != BusState.LIVE }
         }

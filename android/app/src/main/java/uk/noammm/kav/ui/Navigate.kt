@@ -575,7 +575,7 @@ internal fun StepCard(
                     ) {
                         LineRow(ride, r)
                         // The bus you'd catch: the first of the times below, not necessarily the planned trip.
-                        if (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)) busStatus(waitArrival(r, ride, waitDeparture(r, ride, wait, now)), now)?.let { st ->
+                        if (uk.noammm.kav.Beta.shipped(FLAG_BUS_STATUS)) busStatus(waitArrival(r, ride, waitDeparture(r, ride, wait, now)), now)?.let { st ->
                             Spacer(Modifier.height(K.gap2))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (st.state == BusState.LIVE || st.state == BusState.LIVE_AT_START) {
@@ -944,7 +944,7 @@ private fun NavigateMap(
     }
 
     val walkArrow = follow != null && step is Step.Walk && heading != null
-    val statusFlag = uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)
+    val statusFlag = uk.noammm.kav.Beta.shipped(FLAG_BUS_STATUS)
     val dual = uk.noammm.kav.DualGps.enabled
     val live = MapGeometry(
         dots = buildList {

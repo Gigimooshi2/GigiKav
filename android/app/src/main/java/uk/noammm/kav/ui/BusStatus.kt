@@ -6,7 +6,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Beta switch for the states below. Off: Kav shows buses the way it always has. */
+/** The states below, shipped; the beta can still switch them off remotely. */
 const val FLAG_BUS_STATUS = "bus_status"
 
 enum class BusState { LIVE, LIVE_AT_START, SCHEDULED, NOT_SEEN, CANCELLED }
@@ -57,13 +57,13 @@ fun busStatus(a: Moovit.Arrival?, now: Long): BusStatus? {
 }
 
 /**
- * The departure to show while you wait for [ride]. With `bus_status` on: the next bus you'd actually
- * catch, the first still to come on the stop's live board (the times on the card), which may be an
- * earlier bus than the one planned. Off: the planned trip, as Kav always did.
+ * The departure to show while you wait for [ride]: the next bus you'd actually catch, the first
+ * still to come on the stop's live board (the times on the card), which may be an earlier bus than
+ * the one planned. (With `bus_status` switched off in a beta: the planned trip.)
  */
 fun waitDeparture(r: Moovit.Resolved, ride: Moovit.Leg, wait: Moovit.Leg?, now: Long): Moovit.Departure {
     val deps = r.departures(ride, wait)
-    if (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS)) {
+    if (uk.noammm.kav.Beta.shipped(FLAG_BUS_STATUS)) {
         deps.filter { it.timeUtc >= now - 60 }.minByOrNull { it.timeUtc }?.let { return it }
     }
     return deps.firstOrNull { it.tripId == ride.tripId } ?: Moovit.Departure(ride.tripId, ride.dep)
@@ -87,7 +87,7 @@ internal fun logLive(journey: uk.noammm.kav.ActiveJourney, now: Long) {
             "sampleAge" to if (a.sampleUtc > 0) now - a.sampleUtc else null,
             "stopIdx" to a.stopIndex, "next" to a.nextStopIndex, "pct" to a.toNextPct,
             "sched" to a.staticUtc, "rt" to a.rtUtc, "start" to a.tripStartUtc, "cert" to a.certainty, "status" to a.status,
-            "state" to st?.state?.name, "shown" to (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS) && st != null),
+            "state" to st?.state?.name, "shown" to (uk.noammm.kav.Beta.shipped(FLAG_BUS_STATUS) && st != null),
             "raw" to Moovit.rawArrivals[a.key],
         )
     }

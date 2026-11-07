@@ -416,7 +416,7 @@ internal fun stepInstruction(step: Step, journey: ActiveJourney, lastLeg: Boolea
             else T("Wait for ${line(ride)}", "המתנה ל${line(ride)}") to listOfNotNull(
                 stop(ride.fromStop),
                 // Beta: the bus's real state (real GPS vs. only the timetable) instead of the time's state.
-                (uk.noammm.kav.Beta.flag(FLAG_BUS_STATUS).takeIf { it }
+                (uk.noammm.kav.Beta.shipped(FLAG_BUS_STATUS).takeIf { it }
                     ?.let { busStatus(waitArrival(r, ride, departure), now)?.takeIf { s -> s.state != BusState.LIVE }?.short }
                     ?: depStateLabel(departure)) + " · " + whenLabel(departure.timeUtc, now),
             ).joinToString(" · ")

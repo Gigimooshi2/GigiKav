@@ -7,8 +7,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 /**
- * Kav Beta switch `dual_gps`: Kav's own location (Android's GPS and network providers) and Google's
- * (Play services' fused location, what Google Maps uses) run side by side. Both show on the trip map
+ * Kav's own location (Android's GPS and network providers) and Google's (Play services' fused
+ * location, what Google Maps uses) run side by side during trips (switch `dual_gps`). Both show on the trip map
  * and both are logged; the one you pick as main drives the app. If the main one goes quiet for 15 s
  * while the other still reports, the other stands in until it's back.
  */
@@ -18,7 +18,7 @@ object DualGps {
     const val FLAG = "dual_gps"
     private const val QUIET_MS = 15_000L
 
-    val enabled: Boolean get() = Beta.flag(FLAG)
+    val enabled: Boolean get() = Beta.shipped(FLAG)
 
     var main by mutableStateOf(Source.GOOGLE)
         private set
