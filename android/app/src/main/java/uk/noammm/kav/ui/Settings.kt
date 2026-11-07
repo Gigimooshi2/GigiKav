@@ -77,6 +77,11 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
         Group(T("search", "חיפוש"))
         PlacesKeyRow(ctx)
 
+        if (uk.noammm.kav.DualGps.enabled) {
+            Group(T("location", "מיקום"))
+            LocationSourceRow(ctx)
+        }
+
         Group(T("privacy", "פרטיות"))
         Column(Modifier.fillMaxWidth().padding(horizontal = K.gap3)) {
             var priv by remember { mutableStateOf(uk.noammm.kav.Prefs.privateSearch(ctx)) }
@@ -362,6 +367,34 @@ private fun PlacesKeyRow(ctx: android.content.Context) {
 
 
 /**
+ * Which location drives the app during trips: Kav's own (Android's GPS and network providers) or
+ * Google's fused location. Both show on the trip map; Google's is the default.
+ */
+@Composable
+private fun LocationSourceRow(ctx: android.content.Context) {
+    Column(Modifier.padding(horizontal = K.gap4), verticalArrangement = Arrangement.spacedBy(K.gap2)) {
+        Text(T("Main location on trips", "מיקום ראשי בנסיעה"), fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium)
+        Text(
+            T("Google's (what Google Maps uses, usually about twice as precise) or Kav's own (Android's GPS and " +
+                "network, nothing from Google). Both show on the trip map; this one drives the trip.",
+                "של Google (מה שגוגל מפות משתמש בו, בדרך כלל מדויק פי שניים בערך) או של Kav (GPS ורשת של אנדרואיד, " +
+                "בלי Google). שניהם מוצגים במפת הנסיעה; זה שנבחר מוביל את הנסיעה."),
+            fontSize = 12.sp, color = K.dim, lineHeight = 16.sp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
+            for (src in uk.noammm.kav.DualGps.Source.entries.reversed()) {
+                Chip(src.label, uk.noammm.kav.DualGps.main == src) { uk.noammm.kav.DualGps.setMain(ctx, src) }
+            }
+        }
+        if (!uk.noammm.kav.GoogleGps.available(ctx)) Text(
+            T("Google location isn't available on this phone (no Play services), so Kav's own is used.",
+                "המיקום של Google לא זמין בטלפון הזה, ולכן משתמשים במיקום של Kav."),
+            fontSize = 12.sp, color = K.problem,
+        )
+    }
+}
+
+/**
  * The beta channel: Kav updates itself to beta builds of itself (same app, so places, widgets and
  * settings stay). Off again: experiments and the log stop at once; the next normal release replaces
  * the beta build.
@@ -453,26 +486,6 @@ private fun BetaSection(ctx: android.content.Context) {
                 " · " + uk.noammm.kav.data.Updates.installedVersion(ctx),
             fontSize = 12.sp, color = K.dim,
         )
-        if (uk.noammm.kav.DualGps.enabled) {
-            Spacer(Modifier.height(K.gap2))
-            Text(T("Main location", "מיקום ראשי"), fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium)
-            Text(
-                T("Kav's own (Android's GPS and network) or Google's (what Google Maps uses). Both show on the trip " +
-                    "map and both are logged; this one drives the app.",
-                    "של Kav (GPS ורשת של אנדרואיד) או של Google (מה שגוגל מפות משתמש בו). שניהם מוצגים במפת הנסיעה " +
-                    "ושניהם נרשמים; זה שנבחר מפעיל את האפליקציה."),
-                fontSize = 12.sp, color = K.dim, lineHeight = 16.sp,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(K.gap2)) {
-                for (src in uk.noammm.kav.DualGps.Source.entries) {
-                    Chip(src.label, uk.noammm.kav.DualGps.main == src) { uk.noammm.kav.DualGps.setMain(ctx, src) }
-                }
-            }
-            if (!uk.noammm.kav.GoogleGps.available(ctx)) Text(
-                T("Google location isn't available on this phone (no Play services).", "המיקום של Google לא זמין בטלפון הזה."),
-                fontSize = 12.sp, color = K.problem,
-            )
-        }
         Spacer(Modifier.height(K.gap2))
         Text(T("Switches", "מתגים"), fontSize = 15.sp, color = K.text, fontWeight = FontWeight.Medium)
         Text(

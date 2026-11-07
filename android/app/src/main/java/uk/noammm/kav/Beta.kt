@@ -77,6 +77,12 @@ object Beta {
 
     fun flag(name: String): Boolean = on && flags[name] == true
 
+    /**
+     * A shipped feature: on for everyone. In a beta build with the channel on, its remote switch can
+     * still turn it off (set to false in beta/flags.json) if something goes wrong.
+     */
+    fun shipped(name: String): Boolean = !on || flags[name] != false
+
     private fun store(ctx: Context) = ctx.getSharedPreferences("kav_beta", Context.MODE_PRIVATE)
 
     /** The secret ntfy topic, made once on this phone. */

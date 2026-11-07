@@ -44,6 +44,13 @@ you're on the way.
 - Favourite places on the home screen, and backups of your places and settings
   to a `.kav` file.
 - Private search, on by default, keeps your location out of searches.
+- Says what's really known about your bus: live (and how many stops away), live but still at its
+  first stop, only scheduled, not seen when it should have left, or cancelled. Moovit puts a
+  made-up bus at the first stop for every trip that hasn't started; Kav doesn't pass that off as
+  live.
+- Two locations on the trip map: Google's (Play services, what Google Maps uses) and Kav's own
+  (Android's GPS and network). Google's drives the trip by default, as it's usually about twice as
+  precise; Settings switches to Kav's own if you'd rather nothing came from Google.
 
 ## Getting it
 

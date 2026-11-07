@@ -12,7 +12,7 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 
-/** Kav Beta: Google's fused location (Play services), the same source Google Maps uses. */
+/** Google's fused location (Play services), the same source Google Maps uses. */
 object GoogleGps {
     fun available(ctx: Context): Boolean = runCatching {
         GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(ctx) == ConnectionResult.SUCCESS

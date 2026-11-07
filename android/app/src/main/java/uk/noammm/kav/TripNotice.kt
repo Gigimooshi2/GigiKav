@@ -191,7 +191,7 @@ internal fun tripNotice(journey: ActiveJourney, current: Int, fix: Fix?, now: Lo
                     listOfNotNull(
                         r.stopName(ride.fromStop)?.takeIf { it.isNotBlank() },
                         r.platform(ride, wait).takeIf { it.isNotBlank() }?.let { T("Platform $it", "רציף $it") },
-                        Beta.flag(FLAG_BUS_STATUS).takeIf { it }?.let { busStatus(waitArrival(r, ride, dep), now)?.short }
+                        Beta.shipped(FLAG_BUS_STATUS).takeIf { it }?.let { busStatus(waitArrival(r, ride, dep), now)?.short }
                             ?: if (dep.live) T("Live", "בזמן אמת") else T("Scheduled", "מתוזמן"),
                     ).joinToString(" · "),
                     if (mins == 0L) T("now", "עכשיו") else T("$mins min", "$mins דק׳"),
