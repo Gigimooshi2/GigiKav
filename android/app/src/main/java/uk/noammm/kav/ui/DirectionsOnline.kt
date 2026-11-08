@@ -81,6 +81,7 @@ fun DirectionsOnline(model: KavModel) {
     var resolved by remember { mutableStateOf(Moovit.Resolved()) }
 
     var open by remember { mutableStateOf<OpenTrip?>(null) }
+    var navigatingFor by remember { mutableStateOf<OpenTrip?>(null) }
     var sort by remember { mutableStateOf(Sort.RECOMMENDED) }
     var departAt by remember { mutableLongStateOf(0L) }
     var nudgedAt by remember { mutableLongStateOf(0L) }
@@ -427,7 +428,13 @@ fun DirectionsOnline(model: KavModel) {
                         model.activeJourney = ActiveJourney(chosen.trip, detailResolved, chosen.fromLabel, chosen.toLabel)
                     }
                 },
-                onNavigating = { model.navigating = it },
+                // Only the trip page that started navigating may stop it: when one trip page replaces
+                // another (smart reroute switch, reopening a trip), the old page leaves after the new
+                // one has started, and must not switch navigation (and with it the popup) off.
+                onNavigating = { on ->
+                    if (on) { navigatingFor = chosen; model.navigating = true }
+                    else if (navigatingFor === chosen) { navigatingFor = null; model.navigating = false }
+                },
                 onShift = if (chosen.resume || active != null) null else { d -> shiftOpen(d) },
                 shifting = shifting,
                 active = active != null,
