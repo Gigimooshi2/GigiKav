@@ -51,6 +51,10 @@ you're on the way.
 - Two locations on the trip map: Google's (Play services, what Google Maps uses) and Kav's own
   (Android's GPS and network). Google's drives the trip by default, as it's usually about twice as
   precise; Settings switches to Kav's own if you'd rather nothing came from Google.
+- Shops, restaurants and other businesses in search, from Google, through a small shared relay
+  (`relay/`) that holds the Places key so it never ships in the app. The relay caps searches per
+  phone per day and counts them by a random install id; it never stores what you type. Switch it
+  off in Settings, or paste your own key instead.
 
 ## Getting it
 

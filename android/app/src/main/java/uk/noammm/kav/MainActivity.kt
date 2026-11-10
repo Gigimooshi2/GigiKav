@@ -1341,6 +1341,14 @@ object Prefs {
         store(ctx).edit().apply { if (key.isNullOrBlank()) remove("placesKey") else putString("placesKey", key.trim()) }.apply()
     }
 
+    /** Businesses in search through Kav's shared Google relay, when there's no key of your own. On by default. */
+    fun sharedPlaces(ctx: Context): Boolean = store(ctx).getBoolean("sharedPlaces", true)
+    fun setSharedPlaces(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("sharedPlaces", on).apply()
+
+    /** A random id for this install, sent to the shared relay so it can cap use per phone. Nothing else in it. */
+    fun installId(ctx: Context): String = store(ctx).getString("installId", null) ?: java.util.UUID.randomUUID().toString()
+        .also { store(ctx).edit().putString("installId", it).apply() }
+
     fun autoUpdate(ctx: Context): Boolean = store(ctx).getBoolean("autoUpdate", true)
     fun setAutoUpdate(ctx: Context, on: Boolean) = store(ctx).edit().putBoolean("autoUpdate", on).apply()
     fun lastUpdateCheck(ctx: Context): Long = store(ctx).getLong("lastUpdateCheck", 0L)
