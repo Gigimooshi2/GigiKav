@@ -137,7 +137,7 @@ fun PlacePicker(
     var google by remember { mutableStateOf<List<uk.noammm.kav.data.GooglePlaces.Suggestion>>(emptyList()) }
     var resolving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val placesKey = remember { uk.noammm.kav.Prefs.placesKey(ctx) }
+    val placesVia = remember { uk.noammm.kav.data.GooglePlaces.via(ctx) }
     var stations by remember { mutableStateOf<List<Moovit.Place>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -202,12 +202,12 @@ fun PlacePicker(
                 Result.failure(e)
             }
         }
-        // Businesses come from Google when the user has set a key; any failure (quota, no network) just leaves Moovit's results.
+        // Businesses come from Google (the user's own key, or Kav's shared relay); any failure (quota, no network) just leaves Moovit's results.
         val fromGoogle = async<List<uk.noammm.kav.data.GooglePlaces.Suggestion>>(kotlinx.coroutines.Dispatchers.IO) {
-            val key = placesKey ?: return@async emptyList()
+            val via = placesVia ?: return@async emptyList()
             if (q.trim().length < 3) return@async emptyList()
             try {
-                uk.noammm.kav.data.GooglePlaces.autocomplete(key, ctx.packageName, q.trim(), at?.takeIf { Moovit.shareLocation })
+                uk.noammm.kav.data.GooglePlaces.autocomplete(via, q.trim(), at?.takeIf { Moovit.shareLocation })
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -347,13 +347,13 @@ fun PlacePicker(
                 val shown = Moovit.Place(s.main, s.secondary, Double.NaN, Double.NaN, meters = s.meters)
                 Box(Modifier.padding(horizontal = K.gap2)) {
                     PlaceRow(shown) {
-                        val key = placesKey ?: return@PlaceRow
+                        val via = placesVia ?: return@PlaceRow
                         if (resolving) return@PlaceRow
                         resolving = true
                         scope.launch {
                             val p = try {
                                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    uk.noammm.kav.data.GooglePlaces.resolve(key, ctx.packageName, s)
+                                    uk.noammm.kav.data.GooglePlaces.resolve(via, s)
                                 }
                             } catch (e: kotlinx.coroutines.CancellationException) {
                                 throw e

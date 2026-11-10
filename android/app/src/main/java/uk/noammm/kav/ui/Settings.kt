@@ -75,7 +75,26 @@ fun SettingsScreen(model: KavModel, onClose: () -> Unit) {
         }
 
         Group(T("search", "חיפוש"))
-        PlacesKeyRow(ctx)
+        var ownKey by remember { mutableStateOf(uk.noammm.kav.Prefs.placesKey(ctx) != null) }
+        if (!ownKey) Column(Modifier.fillMaxWidth().padding(horizontal = K.gap3)) {
+            var shared by remember { mutableStateOf(uk.noammm.kav.Prefs.sharedPlaces(ctx)) }
+            SwitchRow(
+                T("Businesses from Google", "עסקים מ-Google"),
+                T(
+                    "Shops, restaurants and other places in search, through Kav's shared Google service. " +
+                        "What you type goes to Google, along with your area unless private search is on. " +
+                        "The service counts searches per phone (a random id), never what you search. " +
+                        "If it's busy for the day, search finds Moovit's addresses and stops.",
+                    "חנויות, מסעדות ומקומות נוספים בחיפוש, דרך שירות Google המשותף של Kav. " +
+                        "מה שאתם מקלידים נשלח ל-Google, יחד עם האזור שלכם אלא אם חיפוש פרטי פועל. " +
+                        "השירות סופר חיפושים לכל טלפון (מזהה אקראי), אף פעם לא את מה שחיפשתם. " +
+                        "אם הוא עמוס להיום, החיפוש מוצא כתובות ותחנות מ-Moovit.",
+                ),
+                shared,
+                { on -> shared = on; uk.noammm.kav.Prefs.setSharedPlaces(ctx, on) },
+            ) { GlobeGlyph(if (shared) K.text else K.dim, K.surface1, 18.dp) }
+        }
+        PlacesKeyRow(ctx) { ownKey = it }
 
         if (uk.noammm.kav.DualGps.enabled) {
             Group(T("location", "מיקום"))
@@ -308,9 +327,9 @@ private fun Absent(title: String, desc: String) {
 
 
 
-/** Paste-in Google Places key: businesses in search, like Moovit's app. Stored only on the phone. */
+/** Paste-in Google Places key, used instead of the shared relay. Stored only on the phone. */
 @Composable
-private fun PlacesKeyRow(ctx: android.content.Context) {
+private fun PlacesKeyRow(ctx: android.content.Context, onSet: (Boolean) -> Unit) {
     var saved by remember { mutableStateOf(uk.noammm.kav.Prefs.placesKey(ctx)) }
     var open by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
@@ -322,7 +341,7 @@ private fun PlacesKeyRow(ctx: android.content.Context) {
         Text(T("Google Places key", "מפתח Google Places"), fontSize = 16.sp, color = K.text)
         Text(
             saved?.let { T("Set (…${it.takeLast(4)}). Businesses come from Google.", "מוגדר (…${it.takeLast(4)}). עסקים מגיעים מ-Google.") }
-                ?: T("Not set. Search finds addresses and stops from Moovit only.", "לא מוגדר. החיפוש מוצא רק כתובות ותחנות מ-Moovit."),
+                ?: T("Optional. Your own key, instead of the shared service.", "לא חובה. מפתח משלכם, במקום השירות המשותף."),
             fontSize = 13.sp, color = K.dim,
         )
         if (open) {
@@ -347,7 +366,7 @@ private fun PlacesKeyRow(ctx: android.content.Context) {
                         .background(if (draft.isNotBlank()) K.accent else K.surface4)
                         .clickable(enabled = draft.isNotBlank()) {
                             uk.noammm.kav.Prefs.setPlacesKey(ctx, draft)
-                            saved = uk.noammm.kav.Prefs.placesKey(ctx); open = false; draft = ""
+                            saved = uk.noammm.kav.Prefs.placesKey(ctx); open = false; draft = ""; onSet(saved != null)
                         }
                         .padding(horizontal = 18.dp, vertical = 10.dp),
                 )
@@ -356,7 +375,7 @@ private fun PlacesKeyRow(ctx: android.content.Context) {
                     modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(K.surface4)
                         .clickable {
                             uk.noammm.kav.Prefs.setPlacesKey(ctx, null)
-                            saved = null; open = false; draft = ""
+                            saved = null; open = false; draft = ""; onSet(false)
                         }
                         .padding(horizontal = 18.dp, vertical = 10.dp),
                 )
