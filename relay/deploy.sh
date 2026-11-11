@@ -17,15 +17,16 @@ if [ -z "$KV" ]; then
   KV=$(curl -sS "${AUTH[@]}" -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/storage/kv/namespaces" \
     -H "content-type: application/json" -d '{"title":"kav-places-stats"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['result']['id'])")
 fi
-TAG=$(curl -sS "${AUTH[@]}" "$API/settings" | python3 -c "import sys,json;d=json.load(sys.stdin);print((d.get('result') or {}).get('migration_tag') or '')" 2>/dev/null || true)
+TAG=$(curl -sS "${AUTH[@]}" "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/scripts" \
+  | python3 -c "import sys,json;print(next((s.get('migration_tag') or '' for s in json.load(sys.stdin)['result'] if s['id']=='$NAME'),''))")
 python3 - "$TAG" "$KV" > metadata.json <<'PY'
 import json,sys
 tag=sys.argv[1]; kv=sys.argv[2]
 m={"main_module":"places-worker.js","compatibility_date":"2025-09-01",
    "bindings":[{"type":"durable_object_namespace","name":"USAGE","class_name":"Usage"},
                {"type":"kv_namespace","name":"STATS","namespace_id":kv},
-               {"type":"plain_text","name":"PER_INSTALL_DAY","text":"200"},
-               {"type":"plain_text","name":"GLOBAL_DAY","text":"3000"}],
+               {"type":"plain_text","name":"PER_INSTALL_DAY","text":"60"},
+               {"type":"plain_text","name":"GLOBAL_DAY","text":"300"}],
    "keep_bindings":["secret_text"]}
 if not tag: m["migrations"]={"new_tag":"v1","new_sqlite_classes":["Usage"]}
 print(json.dumps(m))

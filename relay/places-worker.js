@@ -51,7 +51,7 @@ export default {
     const usage = env.USAGE.get(env.USAGE.idFromName("usage"));
     const call = (path, body) => usage.fetch("https://usage/" + path, { method: "POST", body: JSON.stringify(body) });
     const verdict = await (await call("hit", {
-      day: today(), install, kind, perInstall: +env.PER_INSTALL_DAY || 200, global: +env.GLOBAL_DAY || 3000,
+      day: today(), install, kind, perInstall: +env.PER_INSTALL_DAY || 60, global: +env.GLOBAL_DAY || 300,
     })).json();
     if (!verdict.allowed) return json(429, { error: verdict.reason });
 
