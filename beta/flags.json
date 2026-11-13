@@ -1,4 +1,6 @@
 {
   "bus_status": true,
-  "dual_gps": true
+  "dual_gps": true,
+  "bus_estimate": true,
+  "route_variants": true
 }

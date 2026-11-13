@@ -203,6 +203,9 @@ fun DirectionsOnline(model: KavModel) {
                     it.resolved.pollSecs, it.resolved.patterns + resolved.patterns,
                 ))
             }
+            if (uk.noammm.kav.Beta.flag(FLAG_ROUTE_VARIANTS)) withContext(Dispatchers.IO) {
+                routeVariants(s, fromLL, toLL, departAt, timeType, routeTypesFor(filters), ResultFilter.TAXI !in filters, res.itineraries)
+            }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Moovit.PlannerRefusal) {
@@ -746,5 +749,54 @@ private fun whenLabel(departAt: Long, timeType: Int): String {
     return when (timeType) {
         Moovit.TIME_ARRIVAL -> T("Arrive by ", "הגעה עד ") + stamp
         else -> T("Depart ", "יציאה ") + stamp
+    }
+}
+
+
+/** Kav Beta experiment: what Moovit's planner gives with its other route preferences. Logged only. */
+const val FLAG_ROUTE_VARIANTS = "route_variants"
+
+private fun routeKey(t: Moovit.Itinerary) = t.rides.joinToString(">") { r -> r.shortName.ifBlank { r.lineId.toString() } }
+
+private fun routeSummary(t: Moovit.Itinerary) =
+    routeKey(t) + " " + t.durationMin + "m dep " + t.dep + " arr " + t.arr +
+        " walk " + t.legs.filter { it.kind == Moovit.LegKind.WALK }.sumOf { it.meters } + "m"
+
+/**
+ * Asks the planner again for the same trip with each other value of its route preference field
+ * (Kav normally sends what Moovit's app does) and logs the routes the normal search didn't have,
+ * and whether any of them gets there sooner. Nothing is shown; the logs decide what's worth it.
+ */
+private suspend fun routeVariants(
+    s: uk.noammm.kav.data.MoovitSession,
+    from: Pair<Double, Double>,
+    to: Pair<Double, Double>,
+    departAt: Long,
+    timeType: Int,
+    routeTypes: List<Int>,
+    skipTaxi: Boolean,
+    main: List<Moovit.Itinerary>,
+) {
+    val known = main.map { routeKey(it) }.toSet()
+    val bestArr = main.minOfOrNull { it.arr } ?: return
+    for (pref in listOf(0, 2, 3, 4)) {
+        delay(800)
+        try {
+            val v = Moovit.planItineraries(s, from, to, departAt, timeType, routeTypes, skipTaxi, pref = pref).itineraries
+            val fresh = v.filter { routeKey(it) !in known }
+            uk.noammm.kav.Beta.log(
+                "plan_variant", "pref" to pref, "results" to v.size, "new" to fresh.size,
+                "bestArrDelta" to v.minOfOrNull { it.arr }?.let { it - bestArr },
+                "newBestArrDelta" to fresh.minOfOrNull { it.arr }?.let { it - bestArr },
+                "top" to v.take(6).joinToString(" | ") { routeSummary(it) },
+                "newTop" to fresh.take(4).joinToString(" | ") { routeSummary(it) },
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Moovit.PlannerRefusal) {
+            uk.noammm.kav.Beta.log("plan_variant", "pref" to pref, "refused" to e.code, "title" to e.title)
+        } catch (e: Exception) {
+            uk.noammm.kav.Beta.log("plan_variant", "pref" to pref, "error" to (e.message ?: e.javaClass.simpleName))
+        }
     }
 }
