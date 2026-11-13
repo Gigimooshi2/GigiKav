@@ -21,6 +21,8 @@ In code: `Beta.flag("name")`, always false in Kav.
 |---|---|
 | `bus_status` (shipped: on for everyone; set false here to turn it off in the beta) | Tells a real bus (its own GPS) from Moovit's timetable placeholder parked at the first stop; shows Live / Live at first stop / Scheduled / Not seen yet / Cancelled on the wait step, the floating window and the map (placeholders drawn faded). |
 | `dual_gps` (shipped: on for everyone, Google's library is in every build; set false here to turn it off in the beta) | Runs Kav's own location (Android GPS + network) and Google's fused location (Play services, Kav Beta only) side by side: both on the trip map (Kav amber, Google blue; main solid, other a ring) with a legend that shows accuracy and distance apart and switches the main source; Settings has the same switch. Every fix from both is logged (`fix` with `src`). If the main source is silent 15 s the other stands in (`gps_standin`). |
+| `bus_estimate` (Kav Beta only) | Draws live buses on the trip map where they should be now: moved along their route by the age of their last sample (median ~40 s), at the pace Moovit's own prediction at your next stop implies, never past that stop, nothing for samples over 3 min. Every bus's next sample is checked against both the reported and the estimated position (`bus_est`: `rawErr` vs `estErr` in metres). |
+| `route_variants` (Kav Beta only, nothing shown) | After each search, asks Moovit's planner again with each other value of its route preference field (0, 2, 3, 4; Kav normally sends 1, as Moovit's app does) and logs what comes back (`plan_variant`): routes the normal search didn't have and whether they arrive sooner (`newBestArrDelta`, seconds). |
 
 ## Log
 

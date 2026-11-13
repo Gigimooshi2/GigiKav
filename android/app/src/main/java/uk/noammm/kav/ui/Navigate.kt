@@ -872,9 +872,10 @@ private fun NavigateMap(
     // A bus you're on may have dropped off its boarding stop's board; its prediction at your
     // get-off stop still carries where it is.
     // On the ride step, follow the bus you're actually on (see myBus); otherwise the planned one.
-    fun busOf(l: Moovit.Leg) = (if (step is Step.Ride && l.tripId == chosenRide?.tripId) myBus(l, fix, now, r)?.takeIf { it.hasLocation } else null)
+    fun busOf(l: Moovit.Leg) = ((if (step is Step.Ride && l.tripId == chosenRide?.tripId) myBus(l, fix, now, r)?.takeIf { it.hasLocation } else null)
         ?: r.arrival(l)?.takeIf { it.hasLocation }
-        ?: r.live[Moovit.ArrivalKey(l.toStop, l.tripId)]?.takeIf { it.hasLocation }
+        ?: r.live[Moovit.ArrivalKey(l.toStop, l.tripId)]?.takeIf { it.hasLocation })
+        ?.let { BusEstimate.now(it, r, now) }
     val vehicles = rideLegs.mapNotNull { busOf(it) }
     val vehicleModes = remember(rideLegs, r) {
         rideLegs.mapNotNull { leg ->

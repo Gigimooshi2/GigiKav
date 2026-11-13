@@ -77,6 +77,7 @@ fun waitArrival(r: Moovit.Resolved, ride: Moovit.Leg, dep: Moovit.Departure): Mo
 internal fun logLive(journey: uk.noammm.kav.ActiveJourney, now: Long) {
     if (!uk.noammm.kav.Beta.on) return
     val r = journey.resolved
+    BusEstimate.logAccuracy(r)
     val rides = journey.trip.legs.filter { it.kind == Moovit.LegKind.RIDE }.flatMap { it.options }
     fun put(leg: Moovit.Leg, a: Moovit.Arrival, at: String) {
         val st = busStatus(a, now)

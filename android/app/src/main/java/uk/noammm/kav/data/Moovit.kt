@@ -168,6 +168,12 @@ object Moovit {
         val fromStartSec: Int = -1,
     ) {
         val key get() = ArrivalKey(stopId, tripId)
+        /** The same record with the bus put at another point (an estimate of where it is now). */
+        fun movedTo(lat: Double, lon: Double) = Arrival(
+            stopId, lineId, tripId, staticUtc, rtUtc, statisticalUtc, status, certainty, traffic, frequency,
+            rtDropped, tracked, lat, lon, vehicleId, sampleUtc, vehicleStatus, nextStopIndex, stopIndex,
+            patternStops, tripShapeId, patternId, platform, locSource, toNextPct, fromStartSec,
+        )
         /**
          * Moovit puts every timetabled trip that hasn't started on the map at its first stop, with a
          * made-up "SCHEDULED:…" vehicle. That is the timetable, not a bus.
@@ -956,8 +962,9 @@ object Moovit {
         timeType: Int = TIME_DEPARTURE,
         routeTypes: List<Int> = ALL_ROUTE_TYPES,
         skipTaxi: Boolean = false,
+        pref: Int = 1,
     ): Plan {
-        val body = tripPlanRequest(from, to, whenMs, timeType, routeTypes, skipTaxi)
+        val body = tripPlanRequest(from, to, whenMs, timeType, routeTypes, skipTaxi, pref)
         val h = authHeaders(s) + mapOf("Accept" to "application/json")
         val (code, raw) = post(APP5, "V4/TripPlanner2/Search", body, h)
         if (code == 424) throw refusal(raw)
@@ -1179,6 +1186,7 @@ object Moovit {
         timeType: Int = TIME_DEPARTURE,
         routeTypes: List<Int> = ALL_ROUTE_TYPES,
         skipTaxi: Boolean = false,
+        pref: Int = 1,
     ): ByteArray {
         fun locTarget(lat: Double, lon: Double, caption: String?, locType: Int, source: Int): TWriter {
             val inner = TWriter()
@@ -1198,7 +1206,8 @@ object Moovit {
             i32ListField(13, listOf(5, 1, 2, 4))
             boolField(15, true)
             structField(16, TWriter().boolField(1, false).boolField(3, false))
-            i32Field(17, 1)
+            // 1 is what Moovit's app sends; Kav Beta tries the others (route_variants) to see what they change.
+            i32Field(17, pref)
             strField(18, "suggested_routes")
             stop()
         }.bytes()
