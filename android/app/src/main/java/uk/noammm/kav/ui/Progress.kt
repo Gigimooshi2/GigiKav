@@ -295,15 +295,21 @@ internal fun walkLeft(leg: Moovit.Leg, fix: Fix?, now: Long): Pair<Int, Int> {
 /**
  * The bus you're actually on. Usually the planned trip; but delays can put you on an earlier or
  * later bus of the same line. Rules, so it doesn't flip between buses bunched together:
- * 1. The planned bus wins if it's within 500 m of you (its position updates lag ~30 s).
+ * 1. The planned bus wins if it's within 500 m of you.
  * 2. Otherwise the bus of the same line closest to you, within 200 m, heading to your stop.
  * 3. Once picked, an unplanned bus is kept while it stays within 500 m of you.
+ * Distances allow for how old the bus's position is: it reaches Kav ~40 s after the bus sent it,
+ * sometimes 2 min, and on a fast road the bus you're on is then most of a kilometre "behind" you.
+ * Without that, the planned bus dropped out for a poll now and then, and the get-off time jumped
+ * from Moovit's prediction to the timetable's and back (line 90 on the coast road: 13:13 ↔ 13:20).
  */
 internal fun myBus(ride: Moovit.Leg, fix: Fix?, now: Long, r: Moovit.Resolved?): Moovit.Arrival? {
     val live = r?.live ?: return null
     val planned = live[Moovit.ArrivalKey(ride.toStop, ride.tripId)]
     val f = fix?.takeIf { it.isFresh(now) && it.aboard(ride.shape) } ?: return planned
-    fun dist(a: Moovit.Arrival) = metres(a.lat, a.lon, f.lat, f.lon)
+    // How far the bus may have gone since its sample (up to 3 min at ~72 km/h), taken off the distance.
+    fun slack(a: Moovit.Arrival) = if (a.sampleUtc > 0) (now - a.sampleUtc).coerceIn(0L, 180L) * 20.0 else 0.0
+    fun dist(a: Moovit.Arrival) = (metres(a.lat, a.lon, f.lat, f.lon) - slack(a)).coerceAtLeast(0.0)
     if (planned != null && (!planned.hasLocation || dist(planned) < 500)) { MyBus.picked.remove(ride.tripId); return planned }
     val lines = ride.lineChoices.toSet() + ride.lineId
     val candidates = live.values.filter { a ->
