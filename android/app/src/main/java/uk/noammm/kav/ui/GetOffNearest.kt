@@ -41,6 +41,8 @@ internal object GetOffNearest {
         val walkSec: Long,
         val walkReal: Boolean,
         val planned: Long,
+        /** True when the bus time there is Moovit's live prediction, false when Kav estimated it. */
+        val busLive: Boolean = false,
         val ride: Moovit.Leg,
         val rideStops: List<Int>,
         val rideShape: List<Pair<Double, Double>>,
@@ -86,7 +88,12 @@ internal object GetOffNearest {
         val route = bus?.tripShapeId?.takeIf { it > 0 }?.let { id ->
             r.shapes[id] ?: Moovit.cachedShape(id).ifEmpty { runCatching { Moovit.tripShape(s, id) }.getOrDefault(emptyList()) }
         }.orEmpty()
-        val busAt = r.live[Moovit.ArrivalKey(best.id, bus?.tripId ?: ride.tripId)]?.rtUtc?.takeIf { it > now }
+        // Kav only follows your boarding and get-off stops live, so ask Moovit about this one too.
+        val tripId = bus?.tripId ?: ride.tripId
+        val liveThere = r.live[Moovit.ArrivalKey(best.id, tripId)]
+            ?: runCatching { Moovit.stopArrivals(s, listOf(best.id)).first[Moovit.ArrivalKey(best.id, tripId)] }.getOrNull()
+        val predicted = liveThere?.takeIf { !it.rtDropped }?.rtUtc?.takeIf { it > now }
+        val busAt = predicted
             ?: if (route.size >= 2 && best.point != null) {
                 val me = fix?.takeIf { it.isFresh(now) }?.let { alongPath(it.lat, it.lon, route) }
                     ?: bus?.takeIf { it.hasLocation }?.let { alongPath(it.lat, it.lon, route) } ?: 0.0
@@ -120,7 +127,8 @@ internal object GetOffNearest {
             splitPath(tail, best.lat, best.lon).first
         } else ride.shape
         val planned = liveArrival(steps, index, j, fix, now).first
-        Pick(best, bestIdx - plannedIdx, busAt, path, m, walkSec, walk != null, planned, ride, rideStops, rideShape, dest, known)
+        Pick(best, bestIdx - plannedIdx, busAt, path, m, walkSec, walk != null, planned, predicted != null,
+            ride, rideStops, rideShape, dest, known)
     }
 
     /** The trip from here on: this bus to the stop, then walking ([bike] false) or cycling. */
@@ -187,7 +195,7 @@ internal fun GetOffNearestPanel(j: ActiveJourney, steps: List<Step>, index: Int,
                     failed = pick == null
                     uk.noammm.kav.Beta.log("nearest_find", "found" to (pick != null), "stop" to pick?.stop?.id,
                         "vsPlanned" to pick?.vsPlanned, "metres" to pick?.metres, "walkReal" to pick?.walkReal,
-                        "busAt" to pick?.busAt, "walkArr" to pick?.walkArr, "bikeArr" to pick?.bikeArr, "planned" to pick?.planned)
+                        "busAt" to pick?.busAt, "busLive" to pick?.busLive, "walkArr" to pick?.walkArr, "bikeArr" to pick?.bikeArr, "planned" to pick?.planned)
                 }
             }
             if (failed) androidx.compose.material3.Text(
@@ -202,10 +210,10 @@ internal fun GetOffNearestPanel(j: ActiveJourney, steps: List<Step>, index: Int,
         }
         androidx.compose.material3.Text(where, fontSize = 14.sp, color = K.text)
         androidx.compose.material3.Text(
-            T("Bus there ~${at(p.busAt)}, then ${p.metres} m" + (if (p.walkReal) "" else " (roughly)") + ":\n" +
+            T("Bus there " + (if (p.busLive) "" else "~") + "${at(p.busAt)}, then ${p.metres} m" + (if (p.walkReal) "" else " (roughly)") + ":\n" +
                 "walk ~${mins(p.walkSec)} min, arrive ${at(p.walkArr)} · bike ~${mins(p.bikeSec)} min, arrive ${at(p.bikeArr)}\n" +
                 "Your plan: arrive ${at(p.planned)}",
-                "האוטובוס שם ~${at(p.busAt)}, ואז ${p.metres} מ׳" + (if (p.walkReal) "" else " (בערך)") + ":\n" +
+                "האוטובוס שם " + (if (p.busLive) "" else "~") + "${at(p.busAt)}, ואז ${p.metres} מ׳" + (if (p.walkReal) "" else " (בערך)") + ":\n" +
                 "הליכה ~${mins(p.walkSec)} דק׳, הגעה ${at(p.walkArr)} · אופניים ~${mins(p.bikeSec)} דק׳, הגעה ${at(p.bikeArr)}\n" +
                 "התוכנית שלכם: הגעה ${at(p.planned)}"),
             fontSize = 12.sp, color = K.dim, lineHeight = 17.sp,
