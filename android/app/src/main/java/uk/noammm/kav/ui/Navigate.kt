@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DirectionsBus
+import androidx.compose.material.icons.rounded.Route
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.ZoomOutMap
@@ -919,26 +920,61 @@ private fun NavigateMap(
         splitPath(shape, at.first, at.second).first
     }
 
+    // Map buttons: me / the bus / both / the bus's whole route. A choice holds until the step changes or Reset.
+    var view by remember(step) { mutableStateOf(MapFocus.AUTO) }
+    var nonce by remember { mutableIntStateOf(0) }
+
+    // The bus's whole route: the ride you're on or waiting for, else the next one. Where it goes
+    // after your stop is drawn faded, and your stop is marked, so you can see where you get off.
+    val routeRide = chosenRide ?: rideLegs.firstOrNull()
+    val routeTint = routeRide?.let { rr -> rideLegsShapes.indexOfFirst { it.tripId == rr.tripId } }
+        ?.takeIf { it >= 0 }?.let { tints[it] } ?: K.accent
+    val wholeRoute = routeRide?.let { rr ->
+        val a = r.arrival(rr) ?: r.live[Moovit.ArrivalKey(rr.toStop, rr.tripId)]
+        lineRoute(a, r).ifEmpty { fetched[a?.tripShapeId ?: -1].orEmpty() }
+    }.orEmpty().takeIf { it.size >= 2 }
+    val getOff = routeRide?.let { rr ->
+        (r.stop(rr.toStop)?.point ?: rr.shape.lastOrNull())?.let { onRoute(it, rr.shape.ifEmpty { wholeRoute.orEmpty() }) }
+    }
+    val afterGetOff = remember(wholeRoute, getOff) {
+        if (wholeRoute == null || getOff == null) emptyList() else splitPath(wholeRoute, getOff.first, getOff.second).second
+    }
+
     val walkLegs = legs.filter { it.kind == Moovit.LegKind.WALK }
     val marks = remember(picked, tints, r, K.light) { stationMarks(picked, rideLegsShapes, tints, r) }
     val entrance = rememberVectorPainter(Icons.AutoMirrored.Rounded.Login)
     val exit = rememberVectorPainter(Icons.AutoMirrored.Rounded.Logout)
     val density = LocalDensity.current
     val dir = LocalLayoutDirection.current
-    val geometry = remember(lineRoutes, legs, behind, stopPoints, tints, marks, K.look, K.accent, dir) {
+    val showRoute = view == MapFocus.ROUTE
+    val geometry = remember(lineRoutes, legs, behind, stopPoints, tints, marks, K.look, K.accent, dir, showRoute, afterGetOff, getOff, routeTint) {
         val station = tripMarks(marks, legs.last().shape.lastOrNull(), entrance, exit, density, dir)
         MapGeometry(
             lines = lineRoutes.map { MapLine(it, K.routeIdle, 3f, casing = 6f) } +
                 walkLegs.map { MapLine(it.shape, K.muted, 2f, dashed = true) } +
                 rideLegsShapes.mapIndexed { i, l -> MapLine(l.shape, tints[i], 4f, casing = 8f) } +
-                listOf(MapLine(behind, K.routeIdle, 4f, casing = 8f)),
+                listOf(MapLine(behind, K.routeIdle, 4f, casing = 8f)) +
+                (if (showRoute && afterGetOff.size >= 2) listOf(MapLine(afterGetOff, routeTint.copy(alpha = .45f), 3f, casing = 6f)) else emptyList()),
             dots = stopPoints.flatMap { (ride, at) ->
                 val (lat, lon) = at
                 listOf(MapDot(lat, lon, K.bg, 6f), MapDot(lat, lon, Color.Transparent, 3.5f, tints[ride], 2f))
             } + boardingMarkers(rideLegsShapes, tints, r, r.stops + stopNames) + listOfNotNull(
                 legs.first().shape.firstOrNull()?.let { (lat, lon) -> MapDot(lat, lon, K.bg, 7f) },
                 legs.first().shape.firstOrNull()?.let { (lat, lon) -> MapDot(lat, lon, Color.Transparent, 5f, K.text, 2f) },
-            ) + station.dots,
+            ) + station.dots + (
+                if (!showRoute) emptyList() else listOfNotNull(
+                    afterGetOff.lastOrNull()?.let { (lat, lon) -> MapDot(lat, lon, K.bg, 6f) },
+                    afterGetOff.lastOrNull()?.let { (lat, lon) -> MapDot(lat, lon, routeTint.copy(alpha = .6f), 4f) },
+                ) + getOff?.let { (lat, lon) ->
+                    // Your stop, a size up from the rest: where you get off.
+                    listOf(
+                        MapDot(lat, lon, routeTint.copy(alpha = .25f), 22f),
+                        MapDot(lat, lon, K.bg, 12f),
+                        MapDot(lat, lon, routeTint, 10f),
+                        MapDot(lat, lon, K.bg, 4.5f),
+                    )
+                }.orEmpty()
+            ),
             markers = station.markers,
             images = station.images,
         )
@@ -991,9 +1027,6 @@ private fun NavigateMap(
         },
     )
 
-    // Map buttons: me / the bus / both. A choice holds until the step changes or Reset.
-    var view by remember(step) { mutableStateOf(MapFocus.AUTO) }
-    var nonce by remember { mutableIntStateOf(0) }
     val bus = focusedVehicle?.let { it.lat to it.lon }
     // Where the step you're on ends: the stop you walk to, the stop you board at, the stop you get off at…
     val stepEnd = when (step) {
@@ -1008,6 +1041,7 @@ private fun NavigateMap(
         MapFocus.BUS -> listOfNotNull(bus)
         MapFocus.NEXT -> listOfNotNull(here, stepEnd)
         MapFocus.FINAL -> listOfNotNull(here, finalDest)
+        MapFocus.ROUTE -> wholeRoute.orEmpty() + listOfNotNull(here)
         MapFocus.AUTO -> emptyList()
     }
     val manual = view != MapFocus.AUTO && viewPoints.isNotEmpty()
@@ -1053,6 +1087,10 @@ private fun NavigateMap(
                 here != null && finalDest != null) {
                 view = MapFocus.FINAL; nonce++
             }
+            MapViewButton(Icons.Rounded.Route, T("Show the bus's whole route and where you get off", "הצג את כל מסלול האוטובוס ואיפה יורדים"),
+                view == MapFocus.ROUTE, wholeRoute != null) {
+                view = MapFocus.ROUTE; nonce++
+            }
             if (view != MapFocus.AUTO) MapViewButton(Icons.Rounded.Close, T("Back to the trip view", "חזרה לתצוגת הנסיעה"), false, true) {
                 view = MapFocus.AUTO; nonce++
             }
@@ -1060,7 +1098,7 @@ private fun NavigateMap(
     }
 }
 
-private enum class MapFocus { AUTO, ME, BUS, NEXT, FINAL }
+private enum class MapFocus { AUTO, ME, BUS, NEXT, FINAL, ROUTE }
 
 private fun gpsTint(src: uk.noammm.kav.DualGps.Source) =
     if (src == uk.noammm.kav.DualGps.Source.KAV) Color(0xFFFFA21A) else Color(0xFF4285F4)
