@@ -320,6 +320,7 @@ fun NavigateScreen(
                             steps[page], r, active = page == currentStep, now = now,
                             chosen = chosen, fix = fix,
                             onChoose = ::choose,
+                            journey = journey, steps = steps, stepIndex = page,
                         )
                     }
                 }
@@ -402,7 +403,8 @@ private fun MvNavigate(
                         beyondViewportPageCount = 1,
                     ) { page ->
                         Column(Modifier.fillMaxWidth().onSizeChanged { pageHeights[page] = it.height }.animateContentSize()) {
-                            StepCard(steps[page], r, active = page == currentStep, now = now, chosen = chosen, fix = fix, onChoose = choose)
+                            StepCard(steps[page], r, active = page == currentStep, now = now, chosen = chosen, fix = fix, onChoose = choose,
+                                journey = journey, steps = steps, stepIndex = page)
                         }
                     }
                 }
@@ -486,6 +488,9 @@ internal fun StepCard(
     chosen: Map<Int, Int> = emptyMap(),
     fix: Fix? = null,
     onChoose: (leg: Int, option: Int) -> Unit = { _, _ -> },
+    journey: uk.noammm.kav.ActiveJourney? = null,
+    steps: List<Step> = emptyList(),
+    stepIndex: Int = -1,
 ) {
     when (step) {
         is Step.Start -> Card(T("Start from", "התחלה מ-"), active) {
@@ -633,6 +638,9 @@ internal fun StepCard(
                     Box(Modifier.height(1.dp).fillMaxWidth().background(K.border))
                     Spacer(Modifier.height(K.gap2))
                     StopRail(stops, names, stopsProgress(ride, names, arrival, fix, now), ride.arr)
+                }
+                if (active && journey != null && stepIndex >= 0 && GetOffNearest.on) {
+                    GetOffNearestPanel(journey, steps, stepIndex, fix, now)
                 }
             }
         }
@@ -855,7 +863,16 @@ private fun NavigateMap(
     val rideLegs = picked.filter { it.kind == Moovit.LegKind.RIDE }
     val rideLegsShapes = legs.filter { it.kind != Moovit.LegKind.WALK }
     val tints = routeTints(rideLegsShapes, r)
-    val fetched = rememberLineRoutes(rideLegs.map { r.arrival(it)?.tripShapeId ?: -1 })
+    // The route's shape: from this trip's live record, else any bus of the same line heading the same
+    // way (they share it). A ride already behind you has dropped off the live board.
+    fun shapeIdOf(l: Moovit.Leg): Int =
+        r.arrival(l)?.tripShapeId?.takeIf { it > 0 }
+            ?: r.live[Moovit.ArrivalKey(l.toStop, l.tripId)]?.tripShapeId?.takeIf { it > 0 }
+            ?: r.liveFor(l).firstOrNull { it.tripShapeId > 0 }?.tripShapeId
+            ?: r.live.values.firstOrNull { it.tripId == l.tripId && it.tripShapeId > 0 }?.tripShapeId
+            ?: r.live.values.firstOrNull { it.lineId == l.lineId && it.stopId == l.toStop && it.tripShapeId > 0 }?.tripShapeId
+            ?: -1
+    val fetched = rememberLineRoutes(rideLegs.map { shapeIdOf(it) })
     val lineRoutes = rideLegs
         .map { l ->
             val a = r.arrival(l)
@@ -930,8 +947,10 @@ private fun NavigateMap(
     val routeTint = routeRide?.let { rr -> rideLegsShapes.indexOfFirst { it.tripId == rr.tripId } }
         ?.takeIf { it >= 0 }?.let { tints[it] } ?: K.accent
     val wholeRoute = routeRide?.let { rr ->
-        val a = r.arrival(rr) ?: r.live[Moovit.ArrivalKey(rr.toStop, rr.tripId)]
-        lineRoute(a, r).ifEmpty { fetched[a?.tripShapeId ?: -1].orEmpty() }
+        val id = shapeIdOf(rr)
+        (r.shapes[id] ?: Moovit.cachedShape(id)).ifEmpty { fetched[id].orEmpty() }
+            // Not known at all: at least your part of the ride, to show where you get off.
+            .ifEmpty { rr.shape }
     }.orEmpty().takeIf { it.size >= 2 }
     val getOff = routeRide?.let { rr ->
         (r.stop(rr.toStop)?.point ?: rr.shape.lastOrNull())?.let { onRoute(it, rr.shape.ifEmpty { wholeRoute.orEmpty() }) }
