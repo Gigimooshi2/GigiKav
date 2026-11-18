@@ -2,5 +2,6 @@
   "bus_status": true,
   "dual_gps": true,
   "bus_estimate": true,
-  "route_variants": true
+  "route_variants": true,
+  "get_off_nearest": true
 }
