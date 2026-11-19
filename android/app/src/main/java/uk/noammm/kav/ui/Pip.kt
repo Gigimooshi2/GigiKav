@@ -139,7 +139,8 @@ private fun pipCells(
     if (step !is Step.Start && step !is Step.Walk && step !is Step.Ride) return emptyList()
     val hm = SimpleDateFormat("HH:mm", Locale.US)
     fun until(t: Long): String {
-        val m = ((t - now + 30) / 60).toInt()
+        // Rounded up, like the step card, so the two never disagree by a minute.
+        val m = ((t - now + 59) / 60).toInt()
         return when {
             m <= 0 -> T("now", "עכשיו")
             m < 60 -> T("$m min", "$m דק׳")

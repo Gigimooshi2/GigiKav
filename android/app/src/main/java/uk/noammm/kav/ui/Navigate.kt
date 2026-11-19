@@ -894,6 +894,12 @@ private fun NavigateMap(
         ?: r.arrival(l)?.takeIf { it.hasLocation }
         ?: r.live[Moovit.ArrivalKey(l.toStop, l.tripId)]?.takeIf { it.hasLocation })
         ?.let { BusEstimate.now(it, r, now) }
+        ?.let { b ->
+            // On it: the bus is where you are, and your GPS is fresher than the bus's own report.
+            val f = fix?.takeIf { BusEstimate.on && step is Step.Ride && l.tripId == chosenRide?.tripId && it.isFresh(now) && it.aboard(l.shape) }
+            if (f == null || metres(b.lat, b.lon, f.lat, f.lon) > 900) b
+            else onRoute(f.lat to f.lon, l.shape).let { (la, lo) -> b.movedTo(la, lo) }
+        }
     val vehicles = rideLegs.mapNotNull { busOf(it) }
     val vehicleModes = remember(rideLegs, r) {
         rideLegs.mapNotNull { leg ->
