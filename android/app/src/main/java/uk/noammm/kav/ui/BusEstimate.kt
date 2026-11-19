@@ -10,7 +10,8 @@ const val FLAG_BUS_ESTIMATE = "bus_estimate"
  * 1 in 10 over 75 s), by which time a moving bus is a block or more further on. This moves it
  * forward along its route by the time since its sample, at the pace Moovit itself expects: the
  * distance to the next stop of yours it hasn't reached, over Moovit's predicted time there. It never
- * passes that stop and gives up on samples over 3 minutes old.
+ * passes that stop, never moves it more than 200 m, and gives up on samples over 3 minutes old.
+ * The bus you're riding is simply drawn where you are (see Navigate): your GPS is fresher than its own.
  *
  * Kav Beta logs how far the reported and the estimated positions turn out to be from the bus's
  * next sample ("bus_est"), so the two can be compared before this ships.
@@ -19,6 +20,10 @@ object BusEstimate {
     private const val MAX_AGE_S = 180L
     private const val MAX_SPEED = 17.0 // m/s, about 60 km/h
     private const val OFF_ROUTE_M = 60.0
+    // Buses stop at stops and lights, so a long jump forward overshoots. Measured on 827 next-sample
+    // checks (19 Nov): uncapped, median error 90 m and 9% of estimates 200 m+ worse than the raw
+    // position; capped at 200 m, median 80 m (raw 120 m), p90 200 m (raw 359 m), 3% 200 m+ worse.
+    private const val MAX_FORWARD_M = 200.0
 
     val on: Boolean get() = uk.noammm.kav.Beta.flag(FLAG_BUS_ESTIMATE)
 
@@ -35,7 +40,7 @@ object BusEstimate {
         fun at(shape: List<Pair<Double, Double>>, t: Long): Pair<Double, Double>? {
             val dt = t - sampleUtc
             if (dt <= 0 || dt > MAX_AGE_S) return null
-            return pointAlong(shape, along + (speed * dt).coerceAtMost(limit))
+            return pointAlong(shape, along + (speed * dt).coerceAtMost(minOf(limit, MAX_FORWARD_M)))
         }
     }
 
