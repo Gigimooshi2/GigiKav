@@ -531,8 +531,12 @@ internal fun StepCard(
                         }
                     }
                 }
+                // The last walk ends at your destination, not a stop.
+                val endName = stop?.name
+                    ?: if (step.toRide == null) (steps.lastOrNull() as? Step.Arrive)?.label ?: T("your destination", "היעד שלכם")
+                    else T("your stop", "התחנה שלכם")
                 StopLine(
-                    stop?.name ?: T("your stop", "התחנה שלכם"), stop?.code,
+                    endName, stop?.code,
                     step.toRide?.let { legMode(it, r) },
                     platform = step.toRide?.let { r.platform(it) }.orEmpty(),
                     stopId = step.toStop,

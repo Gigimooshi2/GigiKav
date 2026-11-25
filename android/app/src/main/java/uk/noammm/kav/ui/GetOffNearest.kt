@@ -43,6 +43,8 @@ internal object GetOffNearest {
         val planned: Long,
         /** True when the bus time there is Moovit's live prediction, false when Kav estimated it. */
         val busLive: Boolean = false,
+        /** The trip of the bus you're actually on (may not be the planned one). */
+        val busTripId: Long,
         val ride: Moovit.Leg,
         val rideStops: List<Int>,
         val rideShape: List<Pair<Double, Double>>,
@@ -128,13 +130,14 @@ internal object GetOffNearest {
         } else ride.shape
         val planned = liveArrival(steps, index, j, fix, now).first
         Pick(best, bestIdx - plannedIdx, busAt, path, m, walkSec, walk != null, planned, predicted != null,
-            ride, rideStops, rideShape, dest, known)
+            tripId, ride, rideStops, rideShape, dest, known)
     }
 
     /** The trip from here on: this bus to the stop, then walking ([bike] false) or cycling. */
     fun trip(p: Pick, bike: Boolean): Pair<Moovit.Itinerary, (Moovit.Resolved) -> Moovit.Resolved> {
+        // Keep following the bus you're on, not the planned trip (which may be the next bus along).
         val ride = p.ride.copy(
-            toStop = p.stop.id, arr = p.busAt, stops = p.rideStops,
+            tripId = p.busTripId, toStop = p.stop.id, arr = p.busAt, stops = p.rideStops,
             shape = p.rideShape.ifEmpty { p.ride.shape }, alternatives = emptyList(), nextDeps = emptyList(),
         )
         val end = if (bike) p.bikeArr else p.walkArr
@@ -228,9 +231,14 @@ internal fun GetOffNearestPanel(j: ActiveJourney, steps: List<Step>, index: Int,
                     detail = "", sig = trip.guid, toLabel = j.toLabel,
                 )
             }
-            Pill(T("Walk from there", "ללכת משם"), strong = true) { take(bike = false) }
-            Pill(T("Bike from there", "אופניים משם"), strong = true) { take(bike = true) }
-            Pill(T("Never mind", "לא משנה"), strong = false) { pick = null }
+            if (p.alreadyPlanned) {
+                // Nothing to switch to: the plan already gets off there.
+                Pill(T("OK", "אוקיי"), strong = false) { pick = null }
+            } else {
+                Pill(T("Walk from there", "ללכת משם"), strong = true) { take(bike = false) }
+                Pill(T("Bike from there", "אופניים משם"), strong = true) { take(bike = true) }
+                Pill(T("Never mind", "לא משנה"), strong = false) { pick = null }
+            }
         }
     }
 }

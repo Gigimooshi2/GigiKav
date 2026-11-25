@@ -294,22 +294,28 @@ internal fun walkLeft(leg: Moovit.Leg, fix: Fix?, now: Long): Pair<Int, Int> {
  */
 /**
  * The bus you're actually on. Usually the planned trip; but delays can put you on an earlier or
- * later bus of the same line. Rules, so it doesn't flip between buses bunched together:
+ * later bus of the same line, or on another line of the ride's options. Rules, so it doesn't flip
+ * between buses bunched together:
  * 1. The planned bus wins if it's within 500 m of you.
- * 2. Otherwise the bus of the same line closest to you, within 200 m, heading to your stop.
+ * 2. Otherwise the bus of the ride's lines closest to you, within 200 m, heading to your stop.
  * 3. Once picked, an unplanned bus is kept while it stays within 500 m of you.
- * Distances allow for how old the bus's position is: it reaches Kav ~40 s after the bus sent it,
- * sometimes 2 min, and on a fast road the bus you're on is then most of a kilometre "behind" you.
- * Without that, the planned bus dropped out for a poll now and then, and the get-off time jumped
- * from Moovit's prediction to the timetable's and back (line 90 on the coast road: 13:13 ↔ 13:20).
+ * "Within" compares the bus's report with where you were when it sent it (it reaches Kav ~40 s
+ * late, sometimes 2 min; you're on it, so you were there). Allowing a flat 72 km/h for the delay
+ * instead let a bus 1.5–2 km behind count as yours (line 27 on 25 Nov: 4 of 18 updates; the 623
+ * when you rode the 650 on 19 Nov: 54 of 57), and the times flipped between the two buses.
  */
 internal fun myBus(ride: Moovit.Leg, fix: Fix?, now: Long, r: Moovit.Resolved?): Moovit.Arrival? {
     val live = r?.live ?: return null
     val planned = live[Moovit.ArrivalKey(ride.toStop, ride.tripId)]
+    fix?.takeIf { it.isFresh(now) }?.let { Trail.add(it) }
     val f = fix?.takeIf { it.isFresh(now) && it.aboard(ride.shape) } ?: return planned
-    // How far the bus may have gone since its sample (up to 3 min at ~72 km/h), taken off the distance.
-    fun slack(a: Moovit.Arrival) = if (a.sampleUtc > 0) (now - a.sampleUtc).coerceIn(0L, 180L) * 20.0 else 0.0
-    fun dist(a: Moovit.Arrival) = (metres(a.lat, a.lon, f.lat, f.lon) - slack(a)).coerceAtLeast(0.0)
+    fun dist(a: Moovit.Arrival): Double {
+        // Where you were when the bus sent this position: on that bus, you were right there.
+        Trail.at(a.sampleUtc)?.let { then -> return metres(a.lat, a.lon, then.lat, then.lon) }
+        // No record that far back (just opened): allow for city speed since the sample.
+        val slack = if (a.sampleUtc > 0) (now - a.sampleUtc).coerceIn(0L, 180L) * 12.0 else 0.0
+        return (metres(a.lat, a.lon, f.lat, f.lon) - slack).coerceAtLeast(0.0)
+    }
     if (planned != null && (!planned.hasLocation || dist(planned) < 500)) { MyBus.picked.remove(ride.tripId); return planned }
     val lines = ride.lineChoices.toSet() + ride.lineId
     val candidates = live.values.filter { a ->
@@ -321,6 +327,19 @@ internal fun myBus(ride: Moovit.Leg, fix: Fix?, now: Long, r: Moovit.Resolved?):
     val near = candidates.minByOrNull { dist(it) }?.takeIf { dist(it) < 200 }
     if (near != null) { MyBus.picked[ride.tripId] = near.tripId; return near }
     return planned?.takeIf { !it.hasLocation || dist(it) < 600 }
+}
+
+/** Where you've been over the last 4 minutes, to check a bus's late position report against. */
+private object Trail {
+    private val pts = ArrayDeque<Fix>()
+    @Synchronized fun add(f: Fix) {
+        if (pts.lastOrNull()?.at?.let { it >= f.at } == true) return
+        pts.addLast(f)
+        while (pts.isNotEmpty() && f.at - pts.first().at > 240) pts.removeFirst()
+    }
+    /** Your position at [t] (utc seconds), if a fix within 8 s of it is remembered. */
+    @Synchronized fun at(t: Long): Fix? =
+        if (t <= 0) null else pts.minByOrNull { kotlin.math.abs(it.at - t) }?.takeIf { kotlin.math.abs(it.at - t) <= 8 }
 }
 
 /** Remembers, per planned trip, which other bus of the line you turned out to be on. */
