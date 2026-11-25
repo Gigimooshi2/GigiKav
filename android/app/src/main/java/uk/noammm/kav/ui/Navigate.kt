@@ -894,16 +894,21 @@ private fun NavigateMap(
     // A bus you're on may have dropped off its boarding stop's board; its prediction at your
     // get-off stop still carries where it is.
     // On the ride step, follow the bus you're actually on (see myBus); otherwise the planned one.
-    fun busOf(l: Moovit.Leg) = ((if (step is Step.Ride && l.tripId == chosenRide?.tripId) myBus(l, fix, now, r)?.takeIf { it.hasLocation } else null)
-        ?: r.arrival(l)?.takeIf { it.hasLocation }
-        ?: r.live[Moovit.ArrivalKey(l.toStop, l.tripId)]?.takeIf { it.hasLocation })
-        ?.let { BusEstimate.now(it, r, now) }
-        ?.let { b ->
-            // On it: the bus is where you are, and your GPS is fresher than the bus's own report.
-            val f = fix?.takeIf { BusEstimate.on && step is Step.Ride && l.tripId == chosenRide?.tripId && it.isFresh(now) && it.aboard(l.shape) }
-            if (f == null || metres(b.lat, b.lon, f.lat, f.lon) > 900) b
-            else onRoute(f.lat to f.lon, l.shape).let { (la, lo) -> b.movedTo(la, lo) }
-        }
+    fun busOf(l: Moovit.Leg): Moovit.Arrival? {
+        val riding = step is Step.Ride && l.tripId == chosenRide?.tripId
+        val aboard = riding && fix?.let { it.isFresh(now) && it.aboard(l.shape) } == true
+        val found = (if (riding) myBus(l, fix, now, r)?.takeIf { it.hasLocation } else null)
+            // On a bus Kav can't match right now: show none rather than the planned trip, which
+            // may be the next bus along, behind you (the marker jumped between the two).
+            ?: (if (aboard) null else r.arrival(l)?.takeIf { it.hasLocation }
+                ?: r.live[Moovit.ArrivalKey(l.toStop, l.tripId)]?.takeIf { it.hasLocation })
+            ?: return null
+        val b = BusEstimate.now(found, r, now)
+        // On it: the bus is where you are, and your GPS is fresher than the bus's own report.
+        val f = fix?.takeIf { BusEstimate.on && aboard }
+        return if (f == null || metres(b.lat, b.lon, f.lat, f.lon) > 900) b
+        else onRoute(f.lat to f.lon, l.shape).let { (la, lo) -> b.movedTo(la, lo) }
+    }
     val vehicles = rideLegs.mapNotNull { busOf(it) }
     val vehicleModes = remember(rideLegs, r) {
         rideLegs.mapNotNull { leg ->
