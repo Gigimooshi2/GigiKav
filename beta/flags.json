@@ -3,5 +3,6 @@
   "dual_gps": true,
   "bus_estimate": true,
   "route_variants": true,
-  "get_off_nearest": true
+  "get_off_nearest": true,
+  "bike_to_line": true
 }
