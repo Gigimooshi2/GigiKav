@@ -203,6 +203,27 @@ fun DirectionsOnline(model: KavModel) {
                     it.resolved.pollSecs, it.resolved.patterns + resolved.patterns,
                 ))
             }
+            // Kav Beta: bike to the nearest stop of a line that gets you there, then ride.
+            if (uk.noammm.kav.Beta.flag(FLAG_BIKE_TO_LINE) && timeType == Moovit.TIME_DEPARTURE) {
+                val net = model.net ?: runCatching { uk.noammm.kav.loadNet(ctx) }.getOrNull()
+                if (net != null) {
+                    val start = if (departAt > 0) departAt / 1000 else System.currentTimeMillis() / 1000
+                    val extra = withContext(Dispatchers.IO) {
+                        runCatching { BikeToLine.options(s, net, fromLL, toLL, start, routeTypesFor(filters), raw) }
+                            .onFailure { android.util.Log.w("KavBike", "bike options failed", it) }
+                            .getOrDefault(emptyList())
+                    }
+                    if (extra.isNotEmpty()) {
+                        val more = withContext(Dispatchers.IO) { runCatching { Moovit.hydrate(s, extra) }.getOrNull() }
+                        if (more != null) resolved = Moovit.Resolved(
+                            resolved.lines + more.lines, resolved.stops + more.stops, resolved.routeTypes + more.routeTypes,
+                            resolved.live + more.live, resolved.shapes + more.shapes, resolved.pollSecs,
+                            resolved.patterns + more.patterns,
+                        )
+                        raw = raw + extra
+                    }
+                }
+            }
             if (uk.noammm.kav.Beta.flag(FLAG_ROUTE_VARIANTS)) withContext(Dispatchers.IO) {
                 routeVariants(s, fromLL, toLL, departAt, timeType, routeTypesFor(filters), ResultFilter.TAXI !in filters, res.itineraries)
             }
